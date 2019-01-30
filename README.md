@@ -1,2 +1,2 @@
-# Code recording and analyzing for Ca data
+# Tools for recording and analyzing for Ca data
 ...
