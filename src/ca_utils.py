@@ -6,7 +6,7 @@ from glob import glob
 import logging
 
 def parse_metadata(file):
-    """Parses the meta data embedded in tif-file to a dict.a
+    """Parses the meta data embedded in tif-file to a dict.
 
     Args:
         file - ScanImageTiffReader object
@@ -69,7 +69,7 @@ def parse_daq(ypos, next_trigger, sound=None):
         ypos - ypose of the pixel scanner (resets indicate frame onsets
         next_trigger - recording of the next file trigger from scanimage
         sound (optional) - sound recording (requires single channel - sum over left and right channel)
-        
+
     Returns dict with the following keys:
         frame_onset_samples - sample number for the onset of each frame (inferred from the y-pos reset)
         trial_onset_samples - onset of each trial (inferred from peaks in the next_trigger signals)
@@ -129,14 +129,26 @@ def samples2frames(frame_samples, samples):
     return frames
 
 
+def find_nearest(arr, val):
+    return (np.abs(np.array(arr) - val)).argmin()
+
+
 def parse_session(root, expt_id, fs=10000):
+    """
+    Args:
+        root - dir containing the files for that recording
+        expt_id - experiment ID (datename_session, e.g. 20190122_001)
+        fs=10000 - sampling rate in Hz, defaults to 10000Hz
+    Returns:
+        list of dicts, one for each tif file
+    """
     # fs should be in the log or a daq file attr!!
-    path = root + expt_id #another nice recording: 20181220_016_
+    path = root + expt_id
     # global metadata
-    recordings = glob(path + '_*.tif')  # one recording per stimulus
+    recordings = glob(path + '_*.tif')
     recordings.sort()
     logging.info(f'found {len(recordings)} recordings:')
-    
+
     # parse stim log
     logfile_name = path + '_daq.log'
     session_log = parse_session_log(logfile_name)
@@ -153,7 +165,7 @@ def parse_session(root, expt_id, fs=10000):
         except KeyError:
             logging.info(f'sampling rate of recording not saved - defaulting to {fs}Hz')
         d = parse_daq(ypos, next_trigger, sound)
-        
+
     md_list = ['linePeriod', 'linesPerFrame', 'pixelsPerLine', 'scanFrameRate',
                'scanVolumeRate', 'framesPerSlice', 'numSlices', 'stackZStepSize']
 
@@ -164,19 +176,26 @@ def parse_session(root, expt_id, fs=10000):
         metadata = parse_metadata(file)
 
         session_log[cnt]['tif_filename'] = recordings[idx]
-        # session_log[cnt]['tif_metadata'] = metadata
         for md in md_list:
             session_log[cnt][md] = metadata[md]
-            
+
         trial_onset_frame = samples2frames(d['frame_onset_samples'], d['trial_onset_samples'][cnt])[0]
         trial_offset_frame = samples2frames(d['frame_onset_samples'], d['trial_offset_samples'][cnt])[0]
         frame_range = range(trial_onset_frame, trial_offset_frame)
         frame_times = (d['frame_onset_samples'][frame_range] - d['trial_onset_samples'][cnt])/fs*1000
         session_log[cnt]['time_ms'] = frame_times.tolist()
-        
+
         session_log[cnt]['sound_onset_ms'] = float((d['sound_onset_samples'][cnt] - d['trial_onset_samples'][cnt])/fs*1000)
         session_log[cnt]['sound_offset_ms'] = float((d['sound_offset_samples'][cnt] - d['trial_onset_samples'][cnt])/fs*1000)
-        
+
+        session_log[cnt]['sound_onset_frame'] = find_nearest(session_log[cnt]['time_ms'], session_log[0]['sound_onset_ms'])
+        session_log[cnt]['sound_offset_frame'] = find_nearest(session_log[cnt]['time_ms'], session_log[0]['sound_offset_ms'])
+
         session_log[cnt]['sound_onset_ms_from_playlist'] = float(min(session_log[cnt]['silencePre']))
         session_log[cnt]['sound_offset_ms_from_playlist'] = float(d['trial_offset_samples'][cnt]/fs*1000 - min(session_log[cnt]['silencePost']) - d['trial_onset_samples'][cnt]/fs*1000)
-    return session_log 
+
+        # "annotate" frames:
+        # frames alternate between GCAMP and TDTOMATO
+        # M slices, N volumes
+
+    return session_log
