@@ -4,25 +4,32 @@ from ScanImageTiffReader import ScanImageTiffReader
 import h5py
 from glob import glob
 import logging
+from pprint import pprint
+
 
 def parse_metadata(file):
-    """Parses the meta data embedded in tif-file to a dict.
+    """Parse the meta data embedded in tif-file to a dict.
 
     Args:
         file - ScanImageTiffReader object
     Returns:
         metadata - dict
     """
-
     meta_lines = file.metadata().strip().split('\n')
     metadata = dict()
     for meta_line in meta_lines:
         try:
             key, val = meta_line.split(' = ')
             key = key.split('.')[-1]
+            val = val.replace('true', 'True')
+            val = val.replace('false', 'False')
+            val = val.replace('NaN', 'np.nan')
+            if val[0] == '[':
+                val = val.replace(' ', ',')
+                val = val.replace(';', ',')
             try:
                 metadata[key] = eval(val)
-            except (ValueError, NameError):
+            except (ValueError, NameError, SyntaxError):
                 metadata[key] = val
         except:
             pass
@@ -30,14 +37,13 @@ def parse_metadata(file):
 
 
 def parse_session_log(logfile_name):
-    """Reconstructs playlist from log file.
+    """Reconstruct playlist from log file.
 
     Args:
         logfilename
     Returns:
         dict with playlist entries
     """
-
     with open(logfile_name, 'r') as f:
         logs = f.read()
     log_lines = logs.strip().split('\n')
@@ -63,7 +69,7 @@ def parse_session_log(logfile_name):
 
 
 def parse_daq(ypos, next_trigger, sound=None):
-    """Get timing of frames and trials from ca recording.d_ypos
+    """Get timing of frames and trials from ca recording.d_ypos.
 
     Args:
         ypos - ypose of the pixel scanner (resets indicate frame onsets
@@ -167,14 +173,13 @@ def parse_session(root, expt_id, fs=10000):
         d = parse_daq(ypos, next_trigger, sound)
 
     md_list = ['linePeriod', 'linesPerFrame', 'pixelsPerLine', 'scanFrameRate',
-               'scanVolumeRate', 'framesPerSlice', 'numSlices', 'stackZStepSize']
+               'scanVolumeRate', 'framesPerSlice', 'numSlices', 'stackZStepSize', 'channelSave']
 
     # get frame times for each trial
     for cnt in range(len(recordings)):
         idx = cnt
         file = ScanImageTiffReader(recordings[idx])
         metadata = parse_metadata(file)
-
         session_log[cnt]['tif_filename'] = recordings[idx]
         for md in md_list:
             session_log[cnt][md] = metadata[md]
@@ -194,8 +199,12 @@ def parse_session(root, expt_id, fs=10000):
         session_log[cnt]['sound_onset_ms_from_playlist'] = float(min(session_log[cnt]['silencePre']))
         session_log[cnt]['sound_offset_ms_from_playlist'] = float(d['trial_offset_samples'][cnt]/fs*1000 - min(session_log[cnt]['silencePost']) - d['trial_onset_samples'][cnt]/fs*1000)
 
-        # "annotate" frames:
-        # frames alternate between GCAMP and TDTOMATO
+        nb_frames = file.shape()[0]
+        # print(file.shape()[0], len(session_log[cnt]['time_ms']), session_log[cnt]['time_ms'][0])
+        session_log[cnt]['gcamp_frame_indices'] = list(range(nb_frames))
+        session_log[cnt]['tdtomato_frame_indices'] = []
+        if len(metadata['channelSave']) == 2:  # two-channel recording
+            session_log[cnt]['gcamp_frame_indices'] = list(range(0, nb_frames, 2))
+            session_log[cnt]['tdtomato_frame_indices'] = list(range(1, nb_frames, 2))
         # M slices, N volumes
-
     return session_log
