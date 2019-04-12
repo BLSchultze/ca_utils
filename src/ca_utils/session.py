@@ -58,6 +58,7 @@ class Session():
         self._logs_files = parse_trial_files(self.path)
         self._logs_stims = parse_stim_log(self._log_file_name)
         self.logs = pd.concat((pd.DataFrame(self._logs_stims), pd.DataFrame(self._logs_files), pd.DataFrame(self._logs_timing)), axis=1)
+        self.logs.index.name = 'trial'
 
         # session-wide information
         self.nb_trials = len(self.logs)
