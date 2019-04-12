@@ -5,38 +5,12 @@ import h5py
 from glob import glob
 import logging
 from pprint import pprint
+from collections import namedtuple
+from scanimagetiffile import ScanImageTiffFile
+Trial = namedtuple('Trial', ['file_names', 'frames_first', 'frames_last', 'nb_frames', 'frame_width', 'frame_height', 'nb_channels', 'channel_names', 'frame_rate_hz', 'volume_rate_hz', 'nb_slices', 'frame_zindex'])
 
 
-def parse_metadata(file):
-    """Parse the meta data embedded in tif-file to a dict.
-
-    Args:
-        file - ScanImageTiffReader object
-    Returns:
-        metadata - dict
-    """
-    meta_lines = file.metadata().strip().split('\n')
-    metadata = dict()
-    for meta_line in meta_lines:
-        try:
-            key, val = meta_line.split(' = ')
-            key = key.split('.')[-1]
-            val = val.replace('true', 'True')
-            val = val.replace('false', 'False')
-            val = val.replace('NaN', 'np.nan')
-            if val[0] == '[':
-                val = val.replace(' ', ',')
-                val = val.replace(';', ',')
-            try:
-                metadata[key] = eval(val)
-            except (ValueError, NameError, SyntaxError):
-                metadata[key] = val
-        except:
-            pass
-    return metadata
-
-
-def parse_session_log(logfile_name):
+def parse_stim_log(logfile_name):
     """Reconstruct playlist from log file.
 
     Args:
@@ -50,16 +24,12 @@ def parse_session_log(logfile_name):
     session_log = []
     for current_line in log_lines:
         head, _, dict_str = current_line.partition(': ')
-
-        # process head
-        #     timestamp, hostname = head.split(' ')
-        #     timestamp = datetime.strptime(timestamp, '%Y-%m-%d,%H:%M:%S.%f')
-
-        if dict_str[:4] == 'cnt:':
+        if dict_str.startswith('cnt:'):  # indicates playlist line in log file
             dict_items = dict_str.strip().split('; ')
             dd = dict()
             for dict_item in dict_items:
                 key, val = dict_item.strip(';').split(': ')
+                val = val.replace('nan', 'np.nan')
                 try:
                     dd[key.strip()] = eval(val.strip())
                 except (ValueError, NameError):
@@ -68,30 +38,103 @@ def parse_session_log(logfile_name):
     return session_log
 
 
-def parse_daq(ypos, next_trigger, sound=None):
+def parse_files(path):
+    """Load all tif files in the path.
+
+    Args:
+        path
+    Returns:
+        list of ScanImageTiffFile objects
+    """
+    recordings = glob(path + '_*.tif')
+    recordings.sort()
+    logging.info(f'found {len(recordings)} recordings:')
+    files = [ScanImageTiffFile(recording) for recording in recordings]
+    return files
+
+
+def parse_trial_files(path):
+    """Get file info for each trial
+
+    Args:
+        path
+    Returns:
+        list of Trial objects:
+            Trial(file_names, frames_first, frames_last, nb_frames, frame_width, frame_height, nb_channels, channel_names)
+    """
+    files = parse_files(path)
+    # assemble file numbers/names and frame-numbers for each trial
+    trial_starttime = np.concatenate([f.description['nextFileMarkerTimestamps_sec'] for f in files])  # start time of the current trial for each frame
+    file_index = np.concatenate([f.description['acquisitionNumbers'] for f in files]) - 1  # file number for each frame, -1 for 0-based indexing
+    frame_numbers = np.concatenate([f.description['frameNumbers'] for f in files]) - 1  # running number of frames in session, -1 for 0-based indexing
+    trial_uni, trial_index = np.unique(trial_starttime, return_inverse=True)
+    nb_trials = len(trial_uni)
+
+    file_onsets = np.where(np.diff(file_index) > 0)[0].astype(np.uintp)+1  # plus 1 since we want the first frame *after* the change
+    file_onsets = np.pad(file_onsets, (1, 0), mode='constant', constant_values=(0, len(file_index)))  # append first frame as first file onset
+    file_offsets = np.pad(file_onsets[1:], (0, 1), mode='constant', constant_values=(0, len(file_index)))  # append last frame as last file onset
+
+    # probably don't need this if we only care about the first and last frame for that trial from each file
+    frame_index = np.zeros((len(file_index,)), dtype=np.uintp)  # within trial frame number
+    for onset, offset in zip(file_onsets, file_offsets):
+        frame_index[onset:offset] = np.arange(0, offset-onset)
+
+    trials = []
+    # add info about which frame from which files belong to that trial
+    for trial_number in range(nb_trials):
+        idx = np.where(trial_index == trial_number)[0]  # get global frame numbers for current trial
+        frm = frame_index[idx]  # get within-file frame numbers for current trial
+        uni_files = np.unique(file_index[idx])  # which files contribute to the current trial
+
+        file_names = [files[ii].name for ii in uni_files]
+        framenumbers = [frm[file_index[idx] == ii] for ii in uni_files]
+        frames_first = [f[0] for f in framenumbers]
+        frames_last = [f[-1] + 1 for f in framenumbers]  # +1 since we we use it as a range (exclusive bounds), otherwise we would miss the last frame
+        nb_frames = sum([int(last - first) for first, last in zip(frames_first, frames_last)])
+        # add some metadata to the trial info from the first file in each trial
+        frame_width = int(files[uni_files[0]].metadata['hRoiManager.linesPerFrame'])
+        frame_height = int(files[uni_files[0]].metadata['hRoiManager.linesPerFrame'])
+        frame_rate_hz = files[uni_files[0]].metadata['hRoiManager.scanFrameRate']
+        volume_rate_hz = files[uni_files[0]].metadata['hRoiManager.scanVolumeRate']
+        nb_channels = int(len(files[uni_files[0]].metadata['hChannels.channelSave']))
+        channel_names = ['gcamp', 'tdtomato'][:nb_channels]
+        nb_slices = files[uni_files[0]].metadata['hStackManager.numSlices']
+        frame_zindex = np.mod(np.array(frame_numbers[idx[::nb_channels]]), nb_slices)
+        trials.append(Trial(file_names, frames_first, frames_last, nb_frames, frame_width, frame_height, nb_channels, channel_names, frame_rate_hz, volume_rate_hz, nb_slices, frame_zindex))
+    return trials
+
+
+def parse_daq(ypos, zpos, next_trigger, sound=None):
     """Get timing of frames and trials from ca recording.d_ypos.
 
     Args:
-        ypos - ypose of the pixel scanner (resets indicate frame onsets
-        next_trigger - recording of the next file trigger from scanimage
+        ypos - y-position of the pixel scanner (resets indicate frame onsets)
+        zpos - z-position of the piezo scanner
+        next_trigger - recording of the next file trigger from scanimage to partition trials
         sound (optional) - sound recording (requires single channel - sum over left and right channel)
 
     Returns dict with the following keys:
         frame_onset_samples - sample number for the onset of each frame (inferred from the y-pos reset)
+        frame_offset_samples - sample number for the offset of each frame (inferred from the y-pos reset)
         trial_onset_samples - onset of each trial (inferred from peaks in the next_trigger signals)
         trial_offset_samples - offset of each trial (last sample number added as offset for final trial)
         sound_onset_samples - onset of first sound event in the trial (None if no sound provided)
         sound_offset_samples - offset of last sound event in the trial (None if no sound provided)
+        frame_avgzpos - average zpos for each frame
     """
     d_ypos = -np.diff(ypos)
-    frame_onset_samples, _ = find_peaks(d_ypos, height=np.max(d_ypos) / 2)  # these are the samples at which each frame begins (y pos resets)
-
+    frame_offset_samples, _ = find_peaks(d_ypos, height=np.max(d_ypos) / 2)  # samples at which each frame has been stopped being acquired (y pos resets)
+    frame_onset_samples = np.empty_like(frame_offset_samples)
+    frame_onset_samples[1:] = frame_offset_samples[:-1] + 1  # samples after frame offset
+    tmp = find_peaks(-d_ypos[:frame_onset_samples[1]], height=np.max(-d_ypos) / 2)  #  detect first frame onset
+    frame_onset_samples[0] = tmp[0] - 1
     d_nt = np.diff(next_trigger)
     trial_onset_samples, _ = find_peaks(d_nt, height=np.max(d_nt) / 2)
 
     # from these construct trial offset samples:
     trial_offset_samples = np.append(trial_onset_samples[1:], len(next_trigger))  # add last sample as final offset
 
+    # detect sound onsets and offset from DAQ recording of the sound
     sound_onset_samples = None
     sound_offset_samples = None
     if sound is not None:
@@ -105,12 +148,20 @@ def parse_daq(ypos, next_trigger, sound=None):
 
             trial_sound = sound[sound_onset_samples[cnt]:trial_end_sample]
             sound_offset_samples[cnt] = int(sound_onset_samples[cnt] + len(trial_sound) - 1 - np.argmax(trial_sound[::-1] >= thres))
+
+    # get avg z-pos for each frame
+    frame_avgzpos = np.zeros_like(frame_onset_samples, dtype=np.float)
+    for cnt, (on, off) in enumerate(zip(frame_onset_samples, frame_offset_samples)):
+        frame_avgzpos[cnt] = np.mean(zpos[on:off])
+
     d = dict()
+    d['frame_offset_samples'] = frame_offset_samples
     d['frame_onset_samples'] = frame_onset_samples
     d['trial_onset_samples'] = trial_onset_samples
     d['trial_offset_samples'] = trial_offset_samples
     d['sound_onset_samples'] = sound_onset_samples
     d['sound_offset_samples'] = sound_offset_samples
+    d['frame_avgzpos'] = frame_avgzpos
     return d
 
 
@@ -125,86 +176,54 @@ def samples2frames(frame_samples, samples):
     """
     try:
         len(samples)
-    except:
+    except TypeError:
         samples = np.array([samples, ], dtype=np.uintp)
-    frames = np.zeros_like(samples) + len(frame_samples)
-    frame_samples = np.append(frame_samples, np.max(samples) + 1)
+    frames = np.zeros_like(samples)
+    frame_samples = np.append(frame_samples, np.max(samples) + 1)  # why +1?
 
     for cnt, sample in enumerate(samples):
-        frames[cnt] = np.argmax(frame_samples >= sample)
+        frames[cnt] = np.argmax(frame_samples > sample)
     return frames
 
 
 def find_nearest(arr, val):
+    """Find index of occurrence of item in arr closest to val."""
     return (np.abs(np.array(arr) - val)).argmin()
 
 
-def parse_session(root, expt_id, fs=10000):
-    """
-    Args:
-        root - dir containing the files for that recording
-        expt_id - experiment ID (datename_session, e.g. 20190122_001)
-        fs=10000 - sampling rate in Hz, defaults to 10000Hz
-    Returns:
-        list of dicts, one for each tif file
-    """
-    # fs should be in the log or a daq file attr!!
-    path = root + expt_id
-    # global metadata
-    recordings = glob(path + '_*.tif')
-    recordings.sort()
-    logging.info(f'found {len(recordings)} recordings:')
-
-    # parse stim log
-    logfile_name = path + '_daq.log'
-    session_log = parse_session_log(logfile_name)
-
+def parse_trial_timing(daq_file_name):
+    """Parse DAQ file to get frame precise timestamps and sound onset/offset information."""
     # parse DAQ data for synchronization
-    with h5py.File(path + '_daq.h5', 'r') as f:
+    with h5py.File(daq_file_name, 'r') as f:
         data = f['samples']
-        ypos = data[:,0]  # y pos of the scan pixel
-        next_trigger = data[:,-2]
-        sound = np.sum(data[:,3:5], axis=1)  # pool left and right channel
+        ypos = data[:, 0]  # y pos of the scan pixel
+        zpos = data[:, 1]  # z pos of the scan pixel
+        next_trigger = data[:, -2]
+        sound = np.sum(data[:, 3:5], axis=1)  # pool left and right channel
         try:
             fs = f.attrs['rate']
             logging.info(f'using saved sampling rate of: {fs}Hz')
         except KeyError:
-            logging.info(f'sampling rate of recording not saved - defaulting to {fs}Hz')
-        d = parse_daq(ypos, next_trigger, sound)
-
-    md_list = ['linePeriod', 'linesPerFrame', 'pixelsPerLine', 'scanFrameRate',
-               'scanVolumeRate', 'framesPerSlice', 'numSlices', 'stackZStepSize', 'channelSave']
+            fs = 10_000
+            logging.warning(f'sampling rate of recording not found in DAQ file - defaulting to {fs}Hz')
+    d = parse_daq(ypos, zpos, next_trigger, sound)
 
     # get frame times for each trial
-    for cnt in range(len(recordings)):
-        idx = cnt
-        file = ScanImageTiffReader(recordings[idx])
-        metadata = parse_metadata(file)
-        session_log[cnt]['tif_filename'] = recordings[idx]
-        for md in md_list:
-            session_log[cnt][md] = metadata[md]
+    nb_trials = len(d['trial_onset_samples'])
+    Log = namedtuple('Log', ['frametimes_ms', 'frame_avgzpos', 'stimonset_ms', 'stimoffset_ms', 'stimonset_frame', 'stimoffset_frame'])
+    logs = [None]*nb_trials
+    for cnt in range(nb_trials):
+        d['trial_offset_samples'][cnt] = d['trial_offset_samples'][cnt]
+        d['trial_onset_samples'][cnt] = d['trial_onset_samples'][cnt]
 
-        trial_onset_frame = samples2frames(d['frame_onset_samples'], d['trial_onset_samples'][cnt])[0]
-        trial_offset_frame = samples2frames(d['frame_onset_samples'], d['trial_offset_samples'][cnt])[0]
-        frame_range = range(trial_onset_frame, trial_offset_frame)
-        frame_times = (d['frame_onset_samples'][frame_range] - d['trial_onset_samples'][cnt])/fs*1000
-        session_log[cnt]['time_ms'] = frame_times.tolist()
-
-        session_log[cnt]['sound_onset_ms'] = float((d['sound_onset_samples'][cnt] - d['trial_onset_samples'][cnt])/fs*1000)
-        session_log[cnt]['sound_offset_ms'] = float((d['sound_offset_samples'][cnt] - d['trial_onset_samples'][cnt])/fs*1000)
-
-        session_log[cnt]['sound_onset_frame'] = find_nearest(session_log[cnt]['time_ms'], session_log[0]['sound_onset_ms'])
-        session_log[cnt]['sound_offset_frame'] = find_nearest(session_log[cnt]['time_ms'], session_log[0]['sound_offset_ms'])
-
-        session_log[cnt]['sound_onset_ms_from_playlist'] = float(min(session_log[cnt]['silencePre']))
-        session_log[cnt]['sound_offset_ms_from_playlist'] = float(d['trial_offset_samples'][cnt]/fs*1000 - min(session_log[cnt]['silencePost']) - d['trial_onset_samples'][cnt]/fs*1000)
-
-        nb_frames = file.shape()[0]
-        # print(file.shape()[0], len(session_log[cnt]['time_ms']), session_log[cnt]['time_ms'][0])
-        session_log[cnt]['gcamp_frame_indices'] = list(range(nb_frames))
-        session_log[cnt]['tdtomato_frame_indices'] = []
-        if len(metadata['channelSave']) == 2:  # two-channel recording
-            session_log[cnt]['gcamp_frame_indices'] = list(range(0, nb_frames, 2))
-            session_log[cnt]['tdtomato_frame_indices'] = list(range(1, nb_frames, 2))
-        # M slices, N volumes
-    return session_log
+        trial_onset_frame = samples2frames(d['frame_offset_samples'], d['trial_onset_samples'][cnt])[0]
+        trial_offset_frame = samples2frames(d['frame_offset_samples'], d['trial_offset_samples'][cnt])[0]
+        frametimes = (d['frame_offset_samples'][trial_onset_frame:trial_offset_frame] - d['trial_onset_samples'][cnt])/fs*1000
+        frametimes_ms = frametimes.tolist()
+        frame_avgzpos = d['frame_avgzpos'][trial_onset_frame:trial_offset_frame]
+        stimonset_ms = float((d['sound_onset_samples'][cnt] - d['trial_onset_samples'][cnt])/fs*1000)
+        stimoffset_ms = float((d['sound_offset_samples'][cnt] - d['trial_onset_samples'][cnt])/fs*1000)
+        stimonset_frame = find_nearest(frametimes_ms, stimonset_ms)
+        stimoffset_frame = find_nearest(frametimes_ms, stimoffset_ms)
+        logs[cnt] = Log(frametimes_ms, frame_avgzpos, stimonset_ms, stimoffset_ms, stimonset_frame, stimoffset_frame)
+    return logs
