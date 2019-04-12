@@ -1,12 +1,11 @@
 import numpy as np
 from scipy.signal import find_peaks
-from ScanImageTiffReader import ScanImageTiffReader
 import h5py
 from glob import glob
 import logging
 from pprint import pprint
 from collections import namedtuple
-from scanimagetiffile import ScanImageTiffFile
+from .scanimagetiffile import ScanImageTiffFile
 Trial = namedtuple('Trial', ['file_names', 'frames_first', 'frames_last', 'nb_frames', 'frame_width', 'frame_height', 'nb_channels', 'channel_names', 'frame_rate_hz', 'volume_rate_hz', 'nb_slices', 'frame_zindex'])
 
 
