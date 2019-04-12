@@ -1,7 +1,7 @@
 """Represent a single calcium imaging experiment."""
 import numpy as np
 import pandas as pd
-from .ca_utils import parse_trial_timing, parse_trial_files, parse_stim_log
+from .utils import parse_trial_timing, parse_trial_files, parse_stim_log
 from .scanimagetiffile import ScanImageTiffFile
 
 class Session():
