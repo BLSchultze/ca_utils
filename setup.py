@@ -7,7 +7,7 @@ with open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 
 setup(name='ca_utils',
-      version='0.1.1',
+      version='0.2',
       description='ca utils',
       long_description=long_description,
       long_description_content_type="text/markdown",
