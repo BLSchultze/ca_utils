@@ -1,4 +1,4 @@
-"""TTT."""
+"""Represents data and metadata from a by scanimage tif file."""
 from ScanImageTiffReader import ScanImageTiffReader
 
 
@@ -7,13 +7,13 @@ class ScanImageTiffFile(ScanImageTiffReader):
 
     Wrapper around ScanImageTiffReader to make it more pythonic:
     - `shape` and `dtype` are now properties, not functions
-    - description and metadata are parsed into dictionaries not raw strings
+    - description and metadata are parsed into dictionaries not raw strings and are attributes
     - added filename attribute
 
     (link to ScanImageTiffReader and scanimage docs)
 
     Constructor:
-        `file = ScanImageTiffFile(filename)`
+        file = ScanImageTiffFile(filename)
 
     Supports context manager:
     ```
@@ -32,13 +32,23 @@ class ScanImageTiffFile(ScanImageTiffReader):
     """
 
     def __init__(self, filename):
-        """Init."""
+        """Create instance from file name."""
         super().__init__(filename)
         self.name = filename
         self.description = self._parse_description()
         self.metadata = self._parse_metadata()
         self.shape = self.shape()
         self.dtype = self.dtype()
+    
+    def _metadata(self):
+        # Placeholder to keep access to the original metadata 
+        # when replacing it with a attribute of the same name.
+        return super().metadata()
+
+    def _description(self, cnt):
+        # Placeholder to keep access to the original metadata 
+        # when replacing it with a attribute of the same name.
+        return super().description(cnt)
 
     def _translate_matlab_to_python(self, val):
         """Translate a matlab string to python code."""
@@ -66,7 +76,7 @@ class ScanImageTiffFile(ScanImageTiffReader):
         nb_frames = self.shape()[0]
         description = dict()
         for cnt in range(nb_frames):
-            tmp = self.description(cnt)
+            tmp = self._description(cnt)
             lines = tmp.strip().split('\n')
             for line in lines:
                 key, val = line.split(' = ')
@@ -81,7 +91,7 @@ class ScanImageTiffFile(ScanImageTiffReader):
         Returns:
             metadata as dict
         """
-        meta_lines = self.metadata().strip().split('\n')
+        meta_lines = self._metadata().strip().split('\n')
         metadata = dict()
         for meta_line in meta_lines:
             try:

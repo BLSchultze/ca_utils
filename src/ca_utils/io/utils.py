@@ -1,3 +1,5 @@
+import pandas as pd
+
 import numpy as np
 from scipy.signal import find_peaks
 import h5py
@@ -37,6 +39,27 @@ def parse_stim_log(logfile_name):
     return session_log
 
 
+def make_df_multi_index(logs_stims):
+    """Convert logged playlist with list entries into multi-index DataFrame."""
+    keys = list(logs_stims[0].keys())
+    keys.remove('cnt')
+    channels = ['left_sound', 'right_sound']
+    index = pd.MultiIndex.from_product([keys, channels], names=['type', 'channels'])
+    [log_stim.pop('cnt') for log_stim in logs_stims]
+
+    n = dict()
+    for lg in logs_stims:
+        for key, val in lg.items():
+            for cnt, v in enumerate(val):
+                try:
+                    n[(key, channels[cnt])].append(v)
+                except KeyError:
+                    n[(key, channels[cnt])] = []
+                    n[(key, channels[cnt])].append(v)
+    df = pd.DataFrame(n, index=list(range(len(logs_stims))))
+    return df
+
+
 def parse_files(path):
     """Load all tif files in the path.
 
@@ -69,14 +92,14 @@ def parse_trial_files(path):
     trial_uni, trial_index = np.unique(trial_starttime, return_inverse=True)
     nb_trials = len(trial_uni)
 
-    file_onsets = np.where(np.diff(file_index) > 0)[0].astype(np.uintp)+1  # plus 1 since we want the first frame *after* the change
+    file_onsets = np.where(np.diff(file_index) > 0)[0].astype(np.uintp) + 1  # plus 1 since we want the first frame *after* the change
     file_onsets = np.pad(file_onsets, (1, 0), mode='constant', constant_values=(0, len(file_index)))  # append first frame as first file onset
     file_offsets = np.pad(file_onsets[1:], (0, 1), mode='constant', constant_values=(0, len(file_index)))  # append last frame as last file onset
 
     # probably don't need this if we only care about the first and last frame for that trial from each file
     frame_index = np.zeros((len(file_index,)), dtype=np.uintp)  # within trial frame number
     for onset, offset in zip(file_onsets, file_offsets):
-        frame_index[onset:offset] = np.arange(0, offset-onset)
+        frame_index[onset:offset] = np.arange(0, offset - onset)
 
     trials = []
     # add info about which frame from which files belong to that trial
@@ -125,7 +148,7 @@ def parse_daq(ypos, zpos, next_trigger, sound=None):
     frame_offset_samples, _ = find_peaks(d_ypos, height=np.max(d_ypos) / 2)  # samples at which each frame has been stopped being acquired (y pos resets)
     frame_onset_samples = np.empty_like(frame_offset_samples)
     frame_onset_samples[1:] = frame_offset_samples[:-1] + 1  # samples after frame offset
-    tmp = find_peaks(-d_ypos[:frame_onset_samples[1]], height=np.max(-d_ypos) / 2)  #  detect first frame onset
+    tmp = find_peaks(-d_ypos[:frame_onset_samples[1]], height=np.max(-d_ypos) / 2)  # detect first frame onset
     frame_onset_samples[0] = tmp[0] - 1
     d_nt = np.diff(next_trigger)
     trial_onset_samples, _ = find_peaks(d_nt, height=np.max(d_nt) / 2)
@@ -210,18 +233,18 @@ def parse_trial_timing(daq_file_name):
     # get frame times for each trial
     nb_trials = len(d['trial_onset_samples'])
     Log = namedtuple('Log', ['frametimes_ms', 'frame_avgzpos', 'stimonset_ms', 'stimoffset_ms', 'stimonset_frame', 'stimoffset_frame'])
-    logs = [None]*nb_trials
+    logs = [None] * nb_trials
     for cnt in range(nb_trials):
         d['trial_offset_samples'][cnt] = d['trial_offset_samples'][cnt]
         d['trial_onset_samples'][cnt] = d['trial_onset_samples'][cnt]
 
         trial_onset_frame = samples2frames(d['frame_offset_samples'], d['trial_onset_samples'][cnt])[0]
         trial_offset_frame = samples2frames(d['frame_offset_samples'], d['trial_offset_samples'][cnt])[0]
-        frametimes = (d['frame_offset_samples'][trial_onset_frame:trial_offset_frame] - d['trial_onset_samples'][cnt])/fs*1000
+        frametimes = (d['frame_offset_samples'][trial_onset_frame:trial_offset_frame] - d['trial_onset_samples'][cnt]) / fs * 1000
         frametimes_ms = frametimes.tolist()
         frame_avgzpos = d['frame_avgzpos'][trial_onset_frame:trial_offset_frame]
-        stimonset_ms = float((d['sound_onset_samples'][cnt] - d['trial_onset_samples'][cnt])/fs*1000)
-        stimoffset_ms = float((d['sound_offset_samples'][cnt] - d['trial_onset_samples'][cnt])/fs*1000)
+        stimonset_ms = float((d['sound_onset_samples'][cnt] - d['trial_onset_samples'][cnt]) / fs * 1000)
+        stimoffset_ms = float((d['sound_offset_samples'][cnt] - d['trial_onset_samples'][cnt]) / fs * 1000)
         stimonset_frame = find_nearest(frametimes_ms, stimonset_ms)
         stimoffset_frame = find_nearest(frametimes_ms, stimoffset_ms)
         logs[cnt] = Log(frametimes_ms, frame_avgzpos, stimonset_ms, stimoffset_ms, stimonset_frame, stimoffset_frame)
