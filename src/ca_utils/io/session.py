@@ -13,10 +13,12 @@ class Session():
 
     Methods:
         stack(trial_number) - returns 4D matrix [time steps, frame width, frame height, channels]
+        argfind(column_title, pattern, channel=None, op='==') - returns matching trial numbers
+        find(column_title, pattern, channel=None, op='==') - return matching rows from log table
 
     Attributes:
         path
-        logs - pandas DataFrame, one row per trial, with the following columns:
+        log - pandas DataFrame, one row per trial, with the following columns:
            PLAYLIST INFO (copied straight from playlist logs)
             MODE: List[int]
             cnt: int
@@ -61,13 +63,13 @@ class Session():
         tmp = parse_stim_log(self._log_file_name)
 
         self._logs_stims = make_df_multi_index(tmp)
-        self.logs = pd.concat((self._logs_stims,
+        self.log = pd.concat((self._logs_stims,
                                pd.DataFrame(self._logs_files),
                                pd.DataFrame(self._logs_timing)), axis=1)
-        self.logs.index.name = 'trial'
+        self.log.index.name = 'trial'
 
         # session-wide information
-        self.nb_trials = len(self.logs)
+        self.nb_trials = len(self.log)
 
     def __repr__(self):
         return f"Session in {self.path} with {self.nb_trials} trials."
@@ -82,7 +84,7 @@ class Session():
         Returns:
             np.ndarray of shape [time, width, heigh, channels]
         """
-        trial = self.logs.loc[trial_number]
+        trial = self.log.loc[trial_number]
         stack = np.zeros((trial.nb_frames, trial.frame_width, trial.frame_height), dtype=np.int16)
         last_idx = 0
         # gather frames across files
@@ -95,14 +97,14 @@ class Session():
         stack = stack.reshape((int(trial.nb_frames / trial.nb_channels), trial.nb_channels, trial.frame_width, trial.frame_height)).transpose((0, 2, 3, 1))
         return stack
 
-    def argmatch(self, param, pattern, side=None, op='=='):
+    def argfind(self, column_title, pattern, channel=None, op='=='):
         """Get trial numbers of matching rows in playlist.
 
         Args:
-            param:
+            column_title:
             pattern:
-            side=None:
-            op='==': any of the standard comparison operators or 'in' for partial string matching.
+            channel=None:
+            op='==': any of the standard comparison operators ('==', '>', '>=', '<', '<=', ') or 'in' for partial string matching.
         Returns:
             list of indices
         """
@@ -110,14 +112,14 @@ class Session():
         if isinstance(pattern, str):
             pattern = '"' + pattern + '"'
 
-        if side is None:
-            sides = [side for side in self._logs_stims[param]]
+        if channel is None:
+            channels = [channel for channel in self.log[column_title]]
         else:
-            sides = [side]
+            channels = [channel]
 
         matches = []
-        for side in sides:
-            for x, idx in zip(self._logs_stims[(param, side)], self._logs_stims.index):
+        for channel in channels:
+            for x, idx in zip(self.log[(column_title, channel)], self.log.index):
                 if isinstance(x, str):
                     x = '"' + x + '"'
                 if op == 'in':
@@ -128,9 +130,9 @@ class Session():
                     matches.append(idx)
         return matches
 
-    def match(self, param, pattern, side=None, op='=='):
+    def find(self, column_title, pattern, channel=None, op='=='):
         """Get matching rows from playlist.
         See argmatch for details.
         """
-        matches = self.argmatch(param, pattern, side, op)
-        return self._logs_stims.loc[matches]
+        matches = self.argfind(column_title, pattern, channel, op)
+        return self.log.loc[matches]
