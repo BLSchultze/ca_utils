@@ -35,6 +35,7 @@ column_name = 'silencePre'
 channel = 'left_sound'
 pattern = 3000
 op = '=='
+trials = s.argfind(column_name, pattern, channel, op)
 print(f'matching trials: {trials}')
 print(s.find(column_name, pattern, channel, op))
 ```
