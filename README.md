@@ -39,3 +39,26 @@ trials = s.argfind(column_name, pattern, channel, op)
 print(f'matching trials: {trials}')
 print(s.find(column_name, pattern, channel, op))
 ```
+
+### Loading data into SIMA
+First, initialize the session:
+```python
+import ca_utils.io as io
+
+date_name = '20190410'
+session_number = 1
+root = '../../../ca_img/dat'
+session_path = f'{root}/{date_name}/{date_name}_{session_number:03d}'
+s = io.Session(session_path)
+s.log
+```
+Then, load the data for all trials
+```python
+stacks = [s.stack(trial, split_channels=True, split_volumes=True) for trial in range(s.nb_trials)]
+```
+and create the SIMA data set:
+```python
+import sima
+sequences = [sima.Sequence.create('ndarray', stack) for stack in stacks]
+dataset = sima.ImagingDataset(sequences, 'example_np.sima', channel_names=['gcamp', 'tdtomato'])
+```
