@@ -12,7 +12,7 @@ class Session():
         s = Session(path)
 
     Methods:
-        stack(trial_number) - returns 4D matrix [time steps, frame width, frame height, channels]
+        stack(trial_number, split_channels, split_volumes) - returns 3D, 4D, or 5D matrix depending on params
         argfind(column_title, pattern, channel=None, op='==') - returns matching trial numbers
         find(column_title, pattern, channel=None, op='==') - return matching rows from log table
 
@@ -74,15 +74,20 @@ class Session():
     def __repr__(self):
         return f"Session in {self.path} with {self.nb_trials} trials."
 
-    def stack(self, trial_number: int) -> np.ndarray:
+    def stack(self, trial_number: int, split_channels: bool = True, split_volumes: bool = False, force_dims: bool = False) -> np.ndarray:
         """Load stack for a specific trial.
 
-        Will gather frames across files and reshape according to number of channels.
+        Will gather frames across files and reshape according to number of channels and/or volumes.
 
         Args:
             trial_number
+            split_channels - reshape channel-interleaved tif to [time, [volume], x, y, channel]
+            split_volumes - reshape channel-interleaved tif to [time, volume, x, y, [channel]]
         Returns:
             np.ndarray of shape [time, width, heigh, channels]
+
+        TODO: - attach time stamps, reshape them according to volume
+
         """
         trial = self.log.loc[trial_number]
         stack = np.zeros((trial.nb_frames, trial.frame_width, trial.frame_height), dtype=np.int16)
@@ -94,7 +99,28 @@ class Session():
                 stack[last_idx:int(last_idx + d.shape[0]), ...] = d
                 last_idx += d.shape[0]
         # reshape to split channels
-        stack = stack.reshape((int(trial.nb_frames / trial.nb_channels), trial.nb_channels, trial.frame_width, trial.frame_height)).transpose((0, 2, 3, 1))
+        if split_channels:
+            stack = stack.reshape((-1, trial.nb_channels, trial.frame_width, trial.frame_height))
+            stack = stack.transpose((0, 2, 3, 1))  # reorder to [frames, x, y, channels]
+
+        # split by planes into volumes
+        if split_volumes:
+            if split_channels:
+                nb_volumes = int(np.floor(stack.shape[0] / trial.nb_slices) * trial.nb_slices)
+                stack = stack[:nb_volumes, ...]
+                stack = stack.reshape((-1, trial.nb_slices, *stack.shape[1:]))
+            else:
+                nb_volumes = int(np.floor(stack.shape[0] / trial.nb_slices / trial.nb_channels) * trial.nb_slices)
+                stack = stack[:nb_volumes * trial.nb_channels, ...]
+                stack = stack.reshape((-1, trial.nb_slices, *stack.shape[1:]))
+            # stack = stack.swapaxes(0, 1)  # reorder to [frames, planes, ...]
+        
+        if force_dims:
+            if not split_channels:
+                stack = stack[..., np.newaxis]
+            if not split_volumes:
+                stack = stack[:, np.newaxis, ...]
+
         return stack
 
     def argfind(self, column_title, pattern, channel=None, op='=='):
@@ -107,8 +133,8 @@ class Session():
             op='==': any of the standard comparison operators ('==', '>', '>=', '<', '<=', ') or 'in' for partial string matching.
         Returns:
             list of indices
-        """
 
+        """
         if isinstance(pattern, str):
             pattern = '"' + pattern + '"'
 
@@ -131,8 +157,6 @@ class Session():
         return matches
 
     def find(self, column_title, pattern, channel=None, op='=='):
-        """Get matching rows from playlist.
-        See argmatch for details.
-        """
+        """Get matching rows from playlist (see argmatch for details)."""
         matches = self.argfind(column_title, pattern, channel, op)
         return self.log.loc[matches]
