@@ -1,14 +1,15 @@
 import pandas as pd
 
 import numpy as np
-from scipy.signal import find_peaks
+from scipy.signal import find_peaks, savgol_filter
 import h5py
 from glob import glob
 import logging
 from pprint import pprint
 from collections import namedtuple
 from .scanimagetiffile import ScanImageTiffFile
-Trial = namedtuple('Trial', ['file_names', 'frames_first', 'frames_last', 'nb_frames', 'frame_width', 'frame_height', 'nb_channels', 'channel_names', 'frame_rate_hz', 'volume_rate_hz', 'nb_slices', 'frame_zindex'])
+Trial = namedtuple('Trial', ['file_names', 'frames_first', 'frames_last', 'nb_frames', 'frame_width', 'frame_height',
+                             'nb_channels', 'channel_names', 'frame_rate_hz', 'volume_rate_hz', 'nb_slices', 'frame_zindex'])
 
 
 def parse_stim_log(logfile_name):
@@ -186,6 +187,29 @@ def parse_daq(ypos, zpos, next_trigger, sound=None):
     return d
 
 
+def get_pixel_zpos(zpos, frame_shape, frame_onset_samples, frame_offset_samples, smooth_zpos=False):
+    """Get z-position for each get_pixel_zpos.
+
+    Args:
+        zpos for each samples
+        frame_shape - [width, height]
+        frame_onset_samples
+        frame_offset_samples
+        smooth_zpos=False - smooth zpos using Savitzky-Golay filter
+    Returns:
+        array with shape [nb_frames, width, height] with z-positions for each pixel in each frame
+    """
+    if smooth_zpos:
+        zpos = savgol_filter(zpos, 21, 3)
+    pxPerFrame = np.prod(frame_shape)
+    nb_frames = len(frame_onset_samples)
+    zpos_frames = np.empty((nb_frames, *frame_shape))
+    for cnt, (t0, t1) in enumerate(zip(frame_onset_samples, frame_offset_samples)):
+        zpix = np.interp(np.linspace(0, t1-t0, pxPerFrame), np.arange(0, t1-t0), zpos[t0:t1])
+        zpos_frames[cnt, ...] = np.reshape(zpix, frame_shape)
+    return zpos_frames
+
+
 def samples2frames(frame_samples, samples):
     """Get next frame after sample.
 
@@ -212,14 +236,14 @@ def find_nearest(arr, val):
     return (np.abs(np.array(arr) - val)).argmin()
 
 
-def parse_trial_timing(daq_file_name):
+def parse_trial_timing(daq_file_name, frame_shapes=None):
     """Parse DAQ file to get frame precise timestamps and sound onset/offset information."""
     # parse DAQ data for synchronization
     with h5py.File(daq_file_name, 'r') as f:
         data = f['samples']
         ypos = data[:, 0]  # y pos of the scan pixel
         zpos = data[:, 1]  # z pos of the scan pixel
-        next_trigger = data[:, -2]
+        next_trigger = data[:, 5]  # should be "6"
         sound = np.sum(data[:, 3:5], axis=1)  # pool left and right channel
         try:
             fs = f.attrs['rate']
@@ -231,12 +255,9 @@ def parse_trial_timing(daq_file_name):
 
     # get frame times for each trial
     nb_trials = len(d['trial_onset_samples'])
-    Log = namedtuple('Log', ['frametimes_ms', 'frame_zpos', 'stimonset_ms', 'stimoffset_ms', 'stimonset_frame', 'stimoffset_frame'])
+    Log = namedtuple('Log', ['frametimes_ms', 'frame_zpos', 'stimonset_ms', 'stimoffset_ms', 'stimonset_frame', 'stimoffset_frame', 'zpos_frames'])
     logs = [None] * nb_trials
     for cnt in range(nb_trials):
-        d['trial_offset_samples'][cnt] = d['trial_offset_samples'][cnt]
-        d['trial_onset_samples'][cnt] = d['trial_onset_samples'][cnt]
-
         trial_onset_frame = samples2frames(d['frame_offset_samples'], d['trial_onset_samples'][cnt])[0]
         trial_offset_frame = samples2frames(d['frame_offset_samples'], d['trial_offset_samples'][cnt])[0]
         frametimes = (d['frame_offset_samples'][trial_onset_frame:trial_offset_frame] - d['trial_onset_samples'][cnt]) / fs * 1000
@@ -246,5 +267,12 @@ def parse_trial_timing(daq_file_name):
         stimoffset_ms = float((d['sound_offset_samples'][cnt] - d['trial_onset_samples'][cnt]) / fs * 1000)
         stimonset_frame = find_nearest(frametimes_ms, stimonset_ms)
         stimoffset_frame = find_nearest(frametimes_ms, stimoffset_ms)
-        logs[cnt] = Log(frametimes_ms, frame_zpos, stimonset_ms, stimoffset_ms, stimonset_frame, stimoffset_frame)
+        zpos_frames = None
+        if frame_shapes:  # get zpos per pixel
+            zpos_frames = get_pixel_zpos(zpos.copy(), frame_shapes[cnt],
+                                         d['frame_onset_samples'][trial_onset_frame:trial_offset_frame],
+                                         d['frame_offset_samples'][trial_onset_frame:trial_offset_frame],
+                                         smooth_zpos=True)
+
+        logs[cnt] = Log(frametimes_ms, frame_zpos, stimonset_ms, stimoffset_ms, stimonset_frame, stimoffset_frame, zpos_frames)
     return logs

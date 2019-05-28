@@ -51,21 +51,24 @@ class Session():
             stimoffset_frame
     """
 
-    def __init__(self, path):
+    def __init__(self, path, with_pixel_zpos=False):
         """Init."""
         self.path = path
         self._log_file_name = self.path + '_daq.log'
         self._daq_file_name = self.path + '_daq.h5'
 
         # gather information from logs and data files
-        self._logs_timing = parse_trial_timing(self._daq_file_name)
         self._logs_files = parse_trial_files(self.path)
+        frame_shapes = None
+        if with_pixel_zpos:
+            frame_shapes = [(lf.frame_width, lf.frame_height) for lf in self._logs_files]
+        self._logs_timing = parse_trial_timing(self._daq_file_name, frame_shapes)
         tmp = parse_stim_log(self._log_file_name)
 
         self._logs_stims = make_df_multi_index(tmp)
         self.log = pd.concat((self._logs_stims,
-                               pd.DataFrame(self._logs_files),
-                               pd.DataFrame(self._logs_timing)), axis=1)
+                              pd.DataFrame(self._logs_files),
+                              pd.DataFrame(self._logs_timing)), axis=1)
         self.log.index.name = 'trial'
 
         # session-wide information
@@ -122,6 +125,9 @@ class Session():
                 stack = stack[:, np.newaxis, ...]
 
         return stack
+
+    def zpos_stack(trial):
+        pass
 
     def argfind(self, column_title, pattern, channel=None, op='=='):
         """Get trial numbers of matching rows in playlist.
