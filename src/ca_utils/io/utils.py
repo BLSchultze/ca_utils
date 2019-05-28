@@ -109,8 +109,8 @@ def parse_trial_files(path):
 
         file_names = [files[ii].name for ii in uni_files]
         framenumbers = [frm[file_index[idx] == ii] for ii in uni_files]
-        frames_first = [f[0] for f in framenumbers]
-        frames_last = [f[-1] + 1 for f in framenumbers]  # +1 since we we use it as a range (exclusive bounds), otherwise we would miss the last frame
+        frames_first = [int(f[0]) for f in framenumbers]
+        frames_last = [int(f[-1] + 1) for f in framenumbers]  # +1 since we we use it as a range (exclusive bounds), otherwise we would miss the last frame
         nb_frames = sum([int(last - first) for first, last in zip(frames_first, frames_last)])
         # add some metadata to the trial info from the first file in each trial
         frame_width = int(files[uni_files[0]].metadata['hRoiManager.linesPerFrame'])
@@ -141,7 +141,7 @@ def parse_daq(ypos, zpos, next_trigger, sound=None):
         trial_offset_samples - offset of each trial (last sample number added as offset for final trial)
         sound_onset_samples - onset of first sound event in the trial (None if no sound provided)
         sound_offset_samples - offset of last sound event in the trial (None if no sound provided)
-        frame_avgzpos - average zpos for each frame
+        frame_zpos - average zpos for each frame
     """
     d_ypos = -np.diff(ypos)
     frame_offset_samples, _ = find_peaks(d_ypos, height=np.max(d_ypos) / 2)  # samples at which each frame has been stopped being acquired (y pos resets)
@@ -171,9 +171,9 @@ def parse_daq(ypos, zpos, next_trigger, sound=None):
             sound_offset_samples[cnt] = int(sound_onset_samples[cnt] + len(trial_sound) - 1 - np.argmax(trial_sound[::-1] >= thres))
 
     # get avg z-pos for each frame
-    frame_avgzpos = np.zeros_like(frame_onset_samples, dtype=np.float)
+    frame_zpos = np.zeros_like(frame_onset_samples, dtype=np.float)
     for cnt, (on, off) in enumerate(zip(frame_onset_samples, frame_offset_samples)):
-        frame_avgzpos[cnt] = np.mean(zpos[on:off])
+        frame_zpos[cnt] = np.mean(zpos[on:off])
 
     d = dict()
     d['frame_offset_samples'] = frame_offset_samples
@@ -182,7 +182,7 @@ def parse_daq(ypos, zpos, next_trigger, sound=None):
     d['trial_offset_samples'] = trial_offset_samples
     d['sound_onset_samples'] = sound_onset_samples
     d['sound_offset_samples'] = sound_offset_samples
-    d['frame_avgzpos'] = frame_avgzpos
+    d['frame_zpos'] = frame_zpos
     return d
 
 
@@ -231,7 +231,7 @@ def parse_trial_timing(daq_file_name):
 
     # get frame times for each trial
     nb_trials = len(d['trial_onset_samples'])
-    Log = namedtuple('Log', ['frametimes_ms', 'frame_avgzpos', 'stimonset_ms', 'stimoffset_ms', 'stimonset_frame', 'stimoffset_frame'])
+    Log = namedtuple('Log', ['frametimes_ms', 'frame_zpos', 'stimonset_ms', 'stimoffset_ms', 'stimonset_frame', 'stimoffset_frame'])
     logs = [None] * nb_trials
     for cnt in range(nb_trials):
         d['trial_offset_samples'][cnt] = d['trial_offset_samples'][cnt]
@@ -241,10 +241,10 @@ def parse_trial_timing(daq_file_name):
         trial_offset_frame = samples2frames(d['frame_offset_samples'], d['trial_offset_samples'][cnt])[0]
         frametimes = (d['frame_offset_samples'][trial_onset_frame:trial_offset_frame] - d['trial_onset_samples'][cnt]) / fs * 1000
         frametimes_ms = frametimes.tolist()
-        frame_avgzpos = d['frame_avgzpos'][trial_onset_frame:trial_offset_frame]
+        frame_zpos = d['frame_zpos'][trial_onset_frame:trial_offset_frame]
         stimonset_ms = float((d['sound_onset_samples'][cnt] - d['trial_onset_samples'][cnt]) / fs * 1000)
         stimoffset_ms = float((d['sound_offset_samples'][cnt] - d['trial_onset_samples'][cnt]) / fs * 1000)
         stimonset_frame = find_nearest(frametimes_ms, stimonset_ms)
         stimoffset_frame = find_nearest(frametimes_ms, stimoffset_ms)
-        logs[cnt] = Log(frametimes_ms, frame_avgzpos, stimonset_ms, stimoffset_ms, stimonset_frame, stimoffset_frame)
+        logs[cnt] = Log(frametimes_ms, frame_zpos, stimonset_ms, stimoffset_ms, stimonset_frame, stimoffset_frame)
     return logs

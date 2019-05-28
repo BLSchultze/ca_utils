@@ -35,7 +35,7 @@ class Session():
            PER FRAME INFO
             frametimes_ms: List[float] time (in millisecond) for each frame rel. to trial start
             frame_zindex: List[int] slice index for each frame
-            frame_avgzpos: List[float] avg z-pos for each frame
+            frame_zpos: List[float] avg z-pos for each frame
            PER STACK INFO
             nb_frames: int total number of frames in trial
             frame_width
@@ -114,7 +114,7 @@ class Session():
                 stack = stack[:nb_volumes * trial.nb_channels, ...]
                 stack = stack.reshape((-1, trial.nb_slices, *stack.shape[1:]))
             # stack = stack.swapaxes(0, 1)  # reorder to [frames, planes, ...]
-        
+
         if force_dims:
             if not split_channels:
                 stack = stack[..., np.newaxis]
