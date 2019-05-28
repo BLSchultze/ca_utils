@@ -43,8 +43,7 @@ def make_df_multi_index(logs_stims):
     """Convert logged playlist with list entries into multi-index DataFrame."""
     keys = list(logs_stims[0].keys())
     keys.remove('cnt')
-    channels = ['left_sound', 'right_sound']
-    index = pd.MultiIndex.from_product([keys, channels], names=['type', 'channels'])
+    channels = ['left_sound', 'right_sound', 'odor1', 'odor2']
     [log_stim.pop('cnt') for log_stim in logs_stims]
 
     n = dict()
