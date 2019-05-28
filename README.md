@@ -50,8 +50,8 @@ session_number = 1
 root = '../../../ca_img/dat'
 session_path = f'{root}/{date_name}/{date_name}_{session_number:03d}'
 s = io.Session(session_path)
-s.log
 ```
+
 Then, load the data for all trials
 ```python
 stacks = [s.stack(trial, split_channels=True, split_volumes=True) for trial in range(s.nb_trials)]
