@@ -1,11 +1,11 @@
 import pandas as pd
-
 import numpy as np
 from scipy.signal import find_peaks, savgol_filter
+import scipy
 import h5py
 from glob import glob
 import logging
-from pprint import pprint
+from datetime import datetime
 from collections import namedtuple
 from .scanimagetiffile import ScanImageTiffFile
 Trial = namedtuple('Trial', ['file_names', 'frames_first', 'frames_last', 'nb_frames', 'frame_width', 'frame_height',
@@ -236,6 +236,10 @@ def find_nearest(arr, val):
     return (np.abs(np.array(arr) - val)).argmin()
 
 
+def interpolator(x, y, fill_value='extrapolate'):
+    return scipy.interpolate.interp1d(x, y, fill_value=fill_value)
+
+
 def parse_trial_timing(daq_file_name, frame_shapes=None):
     """Parse DAQ file to get frame precise timestamps and sound onset/offset information."""
     # parse DAQ data for synchronization
@@ -245,6 +249,8 @@ def parse_trial_timing(daq_file_name, frame_shapes=None):
         zpos = data[:, 1]  # z pos of the scan pixel
         next_trigger = data[:, 5]  # should be "6"
         sound = np.sum(data[:, 3:5], axis=1)  # pool left and right channel
+        daq_stamps = f['systemtime'][:][:, 0]
+        daq_sampleinterval = f['samplenumber'][:][:, 0]
         try:
             fs = f.attrs['rate']
             logging.info(f'using saved sampling rate of: {fs}Hz')
@@ -253,13 +259,19 @@ def parse_trial_timing(daq_file_name, frame_shapes=None):
             logging.warning(f'sampling rate of recording not found in DAQ file - defaulting to {fs}Hz')
     d = parse_daq(ypos, zpos, next_trigger, sound)
 
+    daq_samplenumber = np.cumsum(daq_sampleinterval)
+    ip = interpolator(daq_samplenumber, daq_stamps)
+
+
     # get frame times for each trial
     nb_trials = len(d['trial_onset_samples'])
-    Log = namedtuple('Log', ['frametimes_ms', 'frame_zpos', 'stimonset_ms', 'stimoffset_ms', 'stimonset_frame', 'stimoffset_frame', 'zpos_frames'])
+    Log = namedtuple('Log', ['trial_onset_time', 'frametimes_ms', 'frame_zpos', 'stimonset_ms', 'stimoffset_ms', 'stimonset_frame', 'stimoffset_frame', 'zpos_frames'])
     logs = [None] * nb_trials
     for cnt in range(nb_trials):
         trial_onset_frame = samples2frames(d['frame_offset_samples'], d['trial_onset_samples'][cnt])[0]
         trial_offset_frame = samples2frames(d['frame_offset_samples'], d['trial_offset_samples'][cnt])[0]
+
+        trial_onset_time = ip(d['trial_onset_samples'][cnt])
         frametimes = (d['frame_offset_samples'][trial_onset_frame:trial_offset_frame] - d['trial_onset_samples'][cnt]) / fs * 1000
         frametimes_ms = frametimes.tolist()
         frame_zpos = d['frame_zpos'][trial_onset_frame:trial_offset_frame]
@@ -274,5 +286,5 @@ def parse_trial_timing(daq_file_name, frame_shapes=None):
                                          d['frame_offset_samples'][trial_onset_frame:trial_offset_frame],
                                          smooth_zpos=True)
 
-        logs[cnt] = Log(frametimes_ms, frame_zpos, stimonset_ms, stimoffset_ms, stimonset_frame, stimoffset_frame, zpos_frames)
+        logs[cnt] = Log(trial_onset_time, frametimes_ms, frame_zpos, stimonset_ms, stimoffset_ms, stimonset_frame, stimoffset_frame, zpos_frames)
     return logs
