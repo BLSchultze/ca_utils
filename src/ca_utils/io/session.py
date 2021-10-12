@@ -85,20 +85,36 @@ class Session():
     def __repr__(self):
         return f"Session in {self.path} with {self.nb_trials} trials."
 
-    def stack(self, trial_number: int, split_channels: bool = True, split_volumes: bool = False, force_dims: bool = False) -> np.ndarray:
-        """Load stack for a specific trial.
+    def stack(self, trial_number: int = None, split_channels: bool = True, split_volumes: bool = False, force_dims: bool = False) -> np.ndarray:
+        """Load stack for a specific trial or for all trials.
 
-        Will gather frames across files and reshape according to number of channels and/or volumes.
+        Gathers frames across files and reshape according to number of channels and/or volumes.
 
         Args:
-            trial_number
-            split_channels - reshape channel-interleaved tif to [time, [volume], x, y, channel]
-            split_volumes - reshape channel-interleaved tif to [time, volume, x, y, [channel]]
+            trial_number (int, optional): Trial to load. If not provided or None, will load concatenate stacks across all trials. Defaults to None.
+            split_channels (bool, optional): reshape channel-interleaved tif to [time, [volume], x, y, channel]. Defaults to True.
+            split_volumes (bool, optional): reshape channel-interleaved tif to [time, volume, x, y, [channel]]. Defaults to False.
+            force_dims (bool, optional): [description]. Defaults to False.
+
         Returns:
             np.ndarray of shape [time, width, heigh, channels]
+        """
+        if trial_number is None:
+            for trial_number in range(self.nb_trials):
+                trial_stack = self._single_trial_stack(trial_number, split_channels, split_volumes, force_dims)
+                if trial_number == 0:  # init stacks on first trial
+                    stack = trial_stack
+                else:
+                    stack = np.append(stack, trial_stack, axis=0)
 
-        TODO: - attach time stamps, reshape them according to volume
+        else:
+            stack = self._single_trial_stack(trial_number, split_channels, split_volumes, force_dims)
+        return stack
 
+    def _single_trial_stack(self, trial_number, split_channels: bool = True, split_volumes: bool = False, force_dims: bool = False) -> np.ndarray:
+        """Loads the stack for a single trial.
+
+        See `stack` for args.
         """
         trial = self.log.loc[trial_number]
         stack = np.zeros((trial.nb_frames, trial.frame_width, trial.frame_height), dtype=np.int16)
@@ -133,6 +149,7 @@ class Session():
                 stack = stack[:, np.newaxis, ...]
 
         return stack
+
 
     def zpos_stack(trial):
         pass
