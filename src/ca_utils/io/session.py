@@ -51,8 +51,16 @@ class Session():
             stimoffset_frame
     """
 
-    def __init__(self, path, with_pixel_zpos=False):
-        """Init."""
+    def __init__(self, path, with_pixel_zpos=False, analog_out_channel_names=None, analog_in_channel_names=None):
+        """Intialize a session.
+
+        Args:
+            path ([type]): [description]
+            with_pixel_zpos (bool, optional): [description]. Defaults to False.
+            analog_out_channel_names ([type], optional): Names of the output channels specified in the playlist. Defaults to None.
+            analog_in_channel_names ([type], optional): Names of the analog input channesl in *_daq.h5 file. Defaults to None.
+        """
+
         self.path = path
         self._log_file_name = self.path + '_daq.log'
         self._daq_file_name = self.path + '_daq.h5'
@@ -62,10 +70,10 @@ class Session():
         frame_shapes = None
         if with_pixel_zpos:
             frame_shapes = [(lf.frame_width, lf.frame_height) for lf in self._logs_files]
-        self._logs_timing = parse_trial_timing(self._daq_file_name, frame_shapes)
+        self._logs_timing = parse_trial_timing(self._daq_file_name, frame_shapes, analog_in_channel_names)
         tmp = parse_stim_log(self._log_file_name)
 
-        self._logs_stims = make_df_multi_index(tmp)
+        self._logs_stims = make_df_multi_index(tmp, analog_out_channel_names)
         self.log = pd.concat((self._logs_stims,
                               pd.DataFrame(self._logs_files),
                               pd.DataFrame(self._logs_timing)), axis=1)
