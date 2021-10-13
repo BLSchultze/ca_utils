@@ -140,7 +140,6 @@ class Session():
                 nb_volumes = int(np.floor(stack.shape[0] / trial.nb_slices / trial.nb_channels) * trial.nb_slices)
                 stack = stack[:nb_volumes * trial.nb_channels, ...]
                 stack = stack.reshape((-1, trial.nb_slices, *stack.shape[1:]))
-            # stack = stack.swapaxes(0, 1)  # reorder to [frames, planes, ...]
 
         if force_dims:
             if not split_channels:
@@ -164,7 +163,6 @@ class Session():
             op='==': any of the standard comparison operators ('==', '>', '>=', '<', '<=', ') or 'in' for partial string matching.
         Returns:
             list of indices
-
         """
         if isinstance(pattern, str):
             pattern = '"' + pattern + '"'
