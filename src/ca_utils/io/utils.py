@@ -288,7 +288,7 @@ def parse_trial_timing(daq_file_name, frame_shapes=None, channel_names: Optional
 
     # get frame times for each trial
     nb_trials = len(d['trial_onset_samples'])
-    log_keys = ['trial_onset_time', 'frametimes_ms', 'frame_zpos', 'stimonset_ms', 'stimoffset_ms', 'stimonset_frame', 'stimoffset_frame', 'zpos_frames']
+    log_keys = ['trial_onset_time', 'frameoffset_ms', 'frameonset_ms', 'frame_zpos', 'stimonset_ms', 'stimoffset_ms', 'stimonset_frame', 'stimoffset_frame', 'zpos_frames']
     for channel_name in channel_names:
         log_keys.append(f'{channel_name}_onset_ms')
         log_keys.append(f'{channel_name}_offset_ms')
@@ -302,17 +302,20 @@ def parse_trial_timing(daq_file_name, frame_shapes=None, channel_names: Optional
         trial_offset_frame = samples2frames(d['frame_offset_samples'], d['trial_offset_samples'][cnt])[0]
 
         logs['trial_onset_time'][cnt] = ip(d['trial_onset_samples'][cnt])
-        frametimes = (d['frame_offset_samples'][trial_onset_frame:trial_offset_frame] - d['trial_onset_samples'][cnt]) / fs * 1000
-        logs['frametimes_ms'][cnt] = frametimes.tolist()
         logs['frame_zpos'][cnt] = d['frame_zpos'][trial_onset_frame:trial_offset_frame]
+
+        frame_onset = (d['frame_onset_samples'][trial_onset_frame:trial_offset_frame] - d['trial_onset_samples'][cnt]) / fs * 1000
+        logs['frameonset_ms'][cnt] = frame_onset.tolist()
+        frame_offset = (d['frame_offset_samples'][trial_onset_frame:trial_offset_frame] - d['trial_onset_samples'][cnt]) / fs * 1000
+        logs['frameoffset_ms'][cnt] = frame_offset.tolist()
 
         for channel_name in channel_names:
             logs[f'{channel_name}_onset_ms'][cnt] = float((d[f'{channel_name}_onset_samples'][cnt] - d['trial_onset_samples'][cnt]) / fs * 1000)
             logs[f'{channel_name}_offset_ms'][cnt] = float((d[f'{channel_name}_offset_samples'][cnt] - d['trial_onset_samples'][cnt]) / fs * 1000)
-            logs[f'{channel_name}_onset_frame'][cnt] = find_nearest(logs['frametimes_ms'][cnt], logs[f'{channel_name}_onset_ms'][cnt])
-            logs[f'{channel_name}_offset_frame'][cnt] = find_nearest(logs['frametimes_ms'][cnt], logs[f'{channel_name}_offset_ms'][cnt])
+            # get these rel. to time of frame midpoint?
+            logs[f'{channel_name}_onset_frame'][cnt] = find_nearest(logs['frameoffset_ms'][cnt], logs[f'{channel_name}_onset_ms'][cnt])
+            logs[f'{channel_name}_offset_frame'][cnt] = find_nearest(logs['frameoffset_ms'][cnt], logs[f'{channel_name}_offset_ms'][cnt])
 
-        # process onsets and offsets from each channel
         if frame_shapes:  # get zpos per pixel
             logs['zpos_frames'][cnt] = get_pixel_zpos(zpos.copy(), frame_shapes[cnt],
                                          d['frame_onset_samples'][trial_onset_frame:trial_offset_frame],
@@ -321,6 +324,4 @@ def parse_trial_timing(daq_file_name, frame_shapes=None, channel_names: Optional
         else:
             logs['zpos_frames'][cnt] = None
 
-
-        # logs[cnt] = Log(trial_onset_time, frametimes_ms, frame_zpos, stimonset_ms, stimoffset_ms, stimonset_frame, stimoffset_frame, zpos_frames)
     return logs
