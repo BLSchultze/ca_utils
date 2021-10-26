@@ -5,15 +5,16 @@ import scipy
 import h5py
 from glob import glob
 import logging
-from datetime import datetime
 from collections import namedtuple
 from .scanimagetiffile import ScanImageTiffFile
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
+
+
 Trial = namedtuple('Trial', ['file_names', 'frames_first', 'frames_last', 'nb_frames', 'frame_width', 'frame_height',
                              'nb_channels', 'channel_names', 'frame_rate_hz', 'volume_rate_hz', 'nb_slices', 'frame_zindex'])
 
 
-def parse_stim_log(logfile_name):
+def parse_stim_log(logfile_name) -> List[Dict[str, Any]]:
     """Reconstruct playlist from log file.
 
     Args:
@@ -41,7 +42,7 @@ def parse_stim_log(logfile_name):
     return session_log
 
 
-def make_df_multi_index(logs_stims, channel_names=None):
+def make_df_multi_index(logs_stims, channel_names=None) -> pd.DataFrame:
     """Convert logged playlist with list entries into multi-index DataFrame."""
     keys = list(logs_stims[0].keys())
     keys.remove('cnt')
@@ -63,7 +64,7 @@ def make_df_multi_index(logs_stims, channel_names=None):
     return df
 
 
-def parse_files(path):
+def parse_files(path) -> List[str]:
     """Load all tif files in the path.
 
     Args:
@@ -129,7 +130,7 @@ def parse_trial_files(path):
     return trials
 
 
-def parse_daq(ypos, zpos, next_trigger, sound=None, channel_names=None):
+def parse_daq(ypos, zpos, next_trigger, sound=None, channel_names=None) -> Dict[str, Any]:
     """Get timing of frames and trials from ca recording.d_ypos.
 
     Args:
@@ -245,7 +246,8 @@ def interpolator(x, y, fill_value='extrapolate'):
     return scipy.interpolate.interp1d(x, y, fill_value=fill_value)
 
 
-def parse_trial_timing(daq_file_name, frame_shapes=None, channel_names: Optional[List[str]] = None):
+def parse_trial_timing(daq_file_name, frame_shapes=None,
+                       channel_names: Optional[List[str]] = None) -> Dict[str, Any]:
     """Parse DAQ file to get frame precise timestamps and sound onset/offset information.
 
     Args:
@@ -256,7 +258,6 @@ def parse_trial_timing(daq_file_name, frame_shapes=None, channel_names: Optional
     Returns:
         [type]: [description]
     """
-
 
     # parse DAQ data for synchronization
     with h5py.File(daq_file_name, 'r') as f:
