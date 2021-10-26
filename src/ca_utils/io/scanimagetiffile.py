@@ -39,14 +39,14 @@ class ScanImageTiffFile(ScanImageTiffReader):
         self.metadata = self._parse_metadata()
         self.shape = self.shape()
         self.dtype = self.dtype()
-    
+
     def _metadata(self):
-        # Placeholder to keep access to the original metadata 
+        # Placeholder to keep access to the original metadata
         # when replacing it with a attribute of the same name.
         return super().metadata()
 
     def _description(self, cnt):
-        # Placeholder to keep access to the original metadata 
+        # Placeholder to keep access to the original metadata
         # when replacing it with a attribute of the same name.
         return super().description(cnt)
 

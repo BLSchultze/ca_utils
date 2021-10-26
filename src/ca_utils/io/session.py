@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from .utils import parse_trial_timing, parse_trial_files, parse_stim_log, make_df_multi_index
 from .scanimagetiffile import ScanImageTiffFile
+from typing import List
 
 
 class Session():
@@ -51,7 +52,7 @@ class Session():
             stimoffset_frame
     """
 
-    def __init__(self, path, with_pixel_zpos=False, analog_out_channel_names=None, analog_in_channel_names=None):
+    def __init__(self, path, with_pixel_zpos=False, analog_out_channel_names=None, analog_in_channel_names=None) -> None:
         """Intialize a session.
 
         Args:
@@ -82,7 +83,7 @@ class Session():
         # session-wide information
         self.nb_trials = len(self.log)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Session in {self.path} with {self.nb_trials} trials."
 
     def stack(self, trial_number: int = None, split_channels: bool = True, split_volumes: bool = False, force_dims: bool = False) -> np.ndarray:
@@ -111,7 +112,7 @@ class Session():
             stack = self._single_trial_stack(trial_number, split_channels, split_volumes, force_dims)
         return stack
 
-    def _single_trial_stack(self, trial_number, split_channels: bool = True, split_volumes: bool = False, force_dims: bool = False) -> np.ndarray:
+    def _single_trial_stack(self, trial_number: int, split_channels: bool = True, split_volumes: bool = False, force_dims: bool = False) -> np.ndarray:
         """Loads the stack for a single trial.
 
         See `stack` for args.
@@ -149,11 +150,7 @@ class Session():
 
         return stack
 
-
-    def zpos_stack(trial):
-        pass
-
-    def argfind(self, column_title, pattern, channel=None, op='=='):
+    def argfind(self, column_title, pattern, channel=None, op='==') -> List[int]:
         """Get trial numbers of matching rows in playlist.
 
         Args:
@@ -177,10 +174,12 @@ class Session():
             for x, idx in zip(self.log[(column_title, channel)], self.log.index):
                 if isinstance(x, str):
                     x = '"' + x + '"'
+
                 if op == 'in':
                     out = eval('{0}{1}{2}'.format(pattern, op, x))
                 else:
                     out = eval('{0}{1}{2}'.format(x, op, pattern))
+
                 if out:
                     matches.append(idx)
         return matches
