@@ -161,6 +161,10 @@ def parse_daq(ypos, zpos, next_trigger, sound=None, channel_names=None) -> Dict[
     # from these construct trial offset samples:
     trial_offset_samples = np.append(trial_onset_samples[1:], len(next_trigger))  # add last sample as final offset
 
+
+    import matplotlib.pyplot as plt
+    plt.ion()
+
     # detect sound onsets and offset from DAQ recording of the sound
     timing_dict = dict()
     if sound is not None and channel_names is not None:
@@ -170,11 +174,26 @@ def parse_daq(ypos, zpos, next_trigger, sound=None, channel_names=None) -> Dict[
             offset_samples = np.zeros((len(trial_onset_samples),), dtype=np.uintp)
             for cnt, (trial_start_sample, trial_end_sample) in enumerate(zip(trial_onset_samples, trial_offset_samples)):
                 trial_sound = sound[trial_start_sample:trial_end_sample, channel]
-                thres = np.max(trial_sound) / 10
-                onset_samples[cnt] = int(trial_start_sample + np.argmax(trial_sound >= thres))
+                trial_sound = np.convolve(np.abs(trial_sound), np.ones((10,))/10)
 
-                trial_sound = sound[onset_samples[cnt]:trial_end_sample, channel]
-                offset_samples[cnt] = int(onset_samples[cnt] + len(trial_sound) - 1 - np.argmax(trial_sound[::-1] >= thres))
+                thres = 0.01 #np.max(trial_sound) / 10
+                # print(np.mean(trial_sound), np.std(trial_sound))
+                # plt.clf()
+                # plt.plot(trial_sound)
+                if np.any(trial_sound >= thres):
+                    onset_samples[cnt] = int(trial_start_sample + np.argmax(trial_sound >= thres))
+                    trial_sound = sound[onset_samples[cnt]:trial_end_sample, channel]
+                    offset_samples[cnt] = int(onset_samples[cnt] + len(trial_sound) - 1 - np.argmax(trial_sound[::-1] >= thres))
+                    # plt.axvline(onset_samples[cnt] - trial_start_sample, c='r', alpha=0.1)
+                    # plt.axvline(offset_samples[cnt] - trial_start_sample, c='r', alpha=0.1)
+                else:
+                    onset_samples[cnt] = -1
+                    offset_samples[cnt] = -1
+
+                # plt.pause(0.001)
+                # plt.show()
+                # breakpoint()
+
             timing_dict[f"{channel_name}_onset_samples"] = onset_samples
             timing_dict[f"{channel_name}_offset_samples"] = offset_samples
 
@@ -281,6 +300,11 @@ def parse_trial_timing(daq_file_name, frame_shapes=None,
         channel_names = [f'channel{channel}' for channel in range(nb_channels)]
     else:
         channel_names = channel_names[3:]
+    # TODO: ignore "start trigger" and "next trigger" channels
+    to_delete = ['start trigger', 'next trigger']
+    channel_names = [c for c in channel_names if c not in to_delete]
+    # TODO: specify threshold for each channel
+
 
     d = parse_daq(ypos, zpos, next_trigger, sound, channel_names)
 
