@@ -98,7 +98,7 @@ def parse_trial_files(path):
 
     file_onsets = np.where(np.diff(file_index) > 0)[0].astype(np.uintp) + 1  # plus 1 since we want the first frame *after* the change
     file_onsets = np.pad(file_onsets, (1, 0), mode='constant', constant_values=(0, len(file_index)))  # append first frame as first file onset
-    file_offsets = np.pad(file_onsets[1:], (0, 1), mode='constant', constant_values=(0, len(file_index)))  # append last frame as last file onset
+    file_offsets = np.pad(file_onsets[1:], (0, 1), mode='constant', constant_values=(0, len(file_index)))  # append last frame as last file offset
 
     # probably don't need this if we only care about the first and last frame for that trial from each file
     frame_index = np.zeros((len(file_index,)), dtype=np.uintp)  # within trial frame number
@@ -170,13 +170,16 @@ def parse_daq(ypos, zpos, next_trigger, sound=None, channel_names=None) -> Dict[
     if sound is not None and channel_names is not None:
         # use these to infer within trial sound onset
         for channel, channel_name in enumerate(channel_names):
+            if channel_name is None:
+                continue
             onset_samples = np.zeros((len(trial_onset_samples),), dtype=np.uintp)
             offset_samples = np.zeros((len(trial_onset_samples),), dtype=np.uintp)
             for cnt, (trial_start_sample, trial_end_sample) in enumerate(zip(trial_onset_samples, trial_offset_samples)):
                 trial_sound = sound[trial_start_sample:trial_end_sample, channel]
+                trial_sound[:10] = 0
                 trial_sound = np.convolve(np.abs(trial_sound), np.ones((10,))/10)
 
-                thres = 0.01 #np.max(trial_sound) / 10
+                thres = 0.01  # TODO: specify threshold for each channel
                 # print(np.mean(trial_sound), np.std(trial_sound))
                 # plt.clf()
                 # plt.plot(trial_sound)
@@ -228,11 +231,11 @@ def get_pixel_zpos(zpos, frame_shape, frame_onset_samples, frame_offset_samples,
         zpos = savgol_filter(zpos, 21, 3)
     pxPerFrame = np.prod(frame_shape)
     nb_frames = len(frame_onset_samples)
-    zpos_frames = np.empty((nb_frames, *frame_shape))
+    pixels_zpos = np.empty((nb_frames, *frame_shape))
     for cnt, (t0, t1) in enumerate(zip(frame_onset_samples, frame_offset_samples)):
         zpix = np.interp(np.linspace(0, t1-t0, pxPerFrame), np.arange(0, t1-t0), zpos[t0:t1])
-        zpos_frames[cnt, ...] = np.reshape(zpix, frame_shape)
-    return zpos_frames
+        pixels_zpos[cnt, ...] = np.reshape(zpix, frame_shape)
+    return pixels_zpos
 
 
 def samples2frames(frame_samples, samples):
@@ -280,12 +283,12 @@ def parse_trial_timing(daq_file_name, frame_shapes=None,
 
     # parse DAQ data for synchronization
     with h5py.File(daq_file_name, 'r') as f:
-        data = f['samples']
+        data = f['samples'][:]
         ypos = data[:, 0]  # y pos of the scan pixel
         zpos = data[:, 1]  # z pos of the scan pixel
         next_trigger = data[:, 5]  # should be "6"
         # sound = np.sum(data[:, 3:5], axis=1)  # pool left and right channel
-        sound = data[:, 3:]
+        # sound = data[:, 3:]
         daq_stamps = f['systemtime'][:][:, 0]
         daq_sampleinterval = f['samplenumber'][:][:, 0]
         try:
@@ -296,25 +299,32 @@ def parse_trial_timing(daq_file_name, frame_shapes=None,
             logging.warning(f'sampling rate of recording not found in DAQ file - defaulting to {fs}Hz')
 
     if channel_names is None:
-        nb_channels = sound.shape[1]
+        nb_channels = data.shape[1]
         channel_names = [f'channel{channel}' for channel in range(nb_channels)]
     else:
-        channel_names = channel_names[3:]
-    # TODO: ignore "start trigger" and "next trigger" channels
-    to_delete = ['start trigger', 'next trigger']
-    channel_names = [c for c in channel_names if c not in to_delete]
-    # TODO: specify threshold for each channel
+        # channel_names = channel_names[3:]
+        pass
 
+    # set channels to ignore to None
+    to_ignore = ['y pos feedback', 'piezo pos feeback', 'line sync', 'start trigger', 'next trigger']
+    for ii, c in enumerate(channel_names):
+        if c in to_ignore:
+            channel_names[ii] = None
 
-    d = parse_daq(ypos, zpos, next_trigger, sound, channel_names)
+    d = parse_daq(ypos, zpos, next_trigger, data, channel_names)
 
     daq_samplenumber = np.cumsum(daq_sampleinterval)
     ip = interpolator(daq_samplenumber, daq_stamps)
 
     # get frame times for each trial
     nb_trials = len(d['trial_onset_samples'])
-    log_keys = ['trial_onset_time', 'frameoffset_ms', 'frameonset_ms', 'frame_zpos', 'stimonset_ms', 'stimoffset_ms', 'stimonset_frame', 'stimoffset_frame', 'zpos_frames']
+    log_keys = ['trial_onset_time', 'trial_offset_time', 'trial_onset_frame', 'trial_offset_frame',
+                'frameoffset_ms', 'frameonset_ms', 'frame_zpos',
+                'stimonset_ms', 'stimoffset_ms', 'stimonset_frame', 'stimoffset_frame',
+                'pixels_zpos']
     for channel_name in channel_names:
+        if channel_name is None:
+            continue
         log_keys.append(f'{channel_name}_onset_ms')
         log_keys.append(f'{channel_name}_offset_ms')
         log_keys.append(f'{channel_name}_onset_frame')
@@ -323,18 +333,21 @@ def parse_trial_timing(daq_file_name, frame_shapes=None,
     logs = {key: [None for _ in range(nb_trials)] for key in log_keys}
 
     for cnt in range(nb_trials):
-        trial_onset_frame = samples2frames(d['frame_offset_samples'], d['trial_onset_samples'][cnt])[0]
-        trial_offset_frame = samples2frames(d['frame_offset_samples'], d['trial_offset_samples'][cnt])[0]
+        logs['trial_onset_frame'][cnt] = samples2frames(d['frame_offset_samples'], d['trial_onset_samples'][cnt])[0]
+        logs['trial_offset_frame'][cnt] = samples2frames(d['frame_offset_samples'], d['trial_offset_samples'][cnt])[0]
 
         logs['trial_onset_time'][cnt] = ip(d['trial_onset_samples'][cnt])
-        logs['frame_zpos'][cnt] = d['frame_zpos'][trial_onset_frame:trial_offset_frame]
+        logs['trial_offset_time'][cnt] = ip(d['trial_offset_samples'][cnt])
+        logs['frame_zpos'][cnt] = d['frame_zpos'][logs['trial_onset_frame'][cnt]:logs['trial_offset_frame'][cnt]]
 
-        frame_onset = (d['frame_onset_samples'][trial_onset_frame:trial_offset_frame] - d['trial_onset_samples'][cnt]) / fs * 1000
+        frame_onset = (d['frame_onset_samples'][logs['trial_onset_frame'][cnt]:logs['trial_offset_frame'][cnt]] - d['trial_onset_samples'][cnt]) / fs * 1000
         logs['frameonset_ms'][cnt] = frame_onset.tolist()
-        frame_offset = (d['frame_offset_samples'][trial_onset_frame:trial_offset_frame] - d['trial_onset_samples'][cnt]) / fs * 1000
+        frame_offset = (d['frame_offset_samples'][logs['trial_onset_frame'][cnt]:logs['trial_offset_frame'][cnt]] - d['trial_onset_samples'][cnt]) / fs * 1000
         logs['frameoffset_ms'][cnt] = frame_offset.tolist()
 
         for channel_name in channel_names:
+            if channel_name is None:
+                continue
             logs[f'{channel_name}_onset_ms'][cnt] = float((d[f'{channel_name}_onset_samples'][cnt] - d['trial_onset_samples'][cnt]) / fs * 1000)
             logs[f'{channel_name}_offset_ms'][cnt] = float((d[f'{channel_name}_offset_samples'][cnt] - d['trial_onset_samples'][cnt]) / fs * 1000)
             # get these rel. to time of frame midpoint?
@@ -342,11 +355,11 @@ def parse_trial_timing(daq_file_name, frame_shapes=None,
             logs[f'{channel_name}_offset_frame'][cnt] = find_nearest(logs['frameoffset_ms'][cnt], logs[f'{channel_name}_offset_ms'][cnt])
 
         if frame_shapes:  # get zpos per pixel
-            logs['zpos_frames'][cnt] = get_pixel_zpos(zpos.copy(), frame_shapes[cnt],
-                                         d['frame_onset_samples'][trial_onset_frame:trial_offset_frame],
-                                         d['frame_offset_samples'][trial_onset_frame:trial_offset_frame],
+            logs['pixels_zpos'][cnt] = get_pixel_zpos(zpos.copy(), frame_shapes[cnt],
+                                                      d['frame_onset_samples'][logs['trial_onset_frame'][cnt]:logs['trial_offset_frame'][cnt]],
+                                                      d['frame_offset_samples'][logs['trial_onset_frame'][cnt]:logs['trial_offset_frame'][cnt]],
                                          smooth_zpos=True)
         else:
-            logs['zpos_frames'][cnt] = None
+            logs['pixels_zpos'][cnt] = None
 
     return logs
