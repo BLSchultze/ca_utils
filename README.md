@@ -2,6 +2,16 @@
 
 installation: `pip install git+https://github.com/janclemenslab/ca_utils`
 
+Full env with napari viewer and caiman
+```python
+mamba create -y -n ca python=3.8
+conda activate ca
+mamba install ipykernel caiman -y -c conda-forge
+pip install "napari[all]"
+pip install git+https://github.com/janclemenslab/napari-tifffile-reader.git
+pip install git+https://github.com/janclemenslab/ca_utils
+```
+
 ## Usage
 ```python
 import ca_utils.io as io
