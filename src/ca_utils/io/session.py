@@ -4,7 +4,7 @@ import pandas as pd
 from .utils import parse_trial_timing, parse_trial_files, parse_stim_log, make_df_multi_index
 from .scanimagetiffile import ScanImageTiffFile
 from typing import List
-
+import zarr
 
 class Session():
     """Session object.
@@ -95,7 +95,8 @@ class Session():
     def __repr__(self) -> str:
         return f"Session in {self.path} with {self.nb_trials} trials."
 
-    def stack(self, trial_number: int = None, split_channels: bool = True, split_volumes: bool = False, force_dims: bool = False) -> np.ndarray:
+    def stack(self, trial_number: int = None, split_channels: bool = True, split_volumes: bool = False,
+              force_dims: bool = False, use_zarr: bool = True) -> np.ndarray:
         """Load stack for a specific trial or for all trials.
 
         Gathers frames across files and reshape according to number of channels and/or volumes.
@@ -113,10 +114,15 @@ class Session():
             for trial_number in range(self.nb_trials):
                 trial_stack = self._single_trial_stack(trial_number, split_channels, split_volumes, force_dims)
                 if trial_number == 0:  # init stacks on first trial
-                    stack = trial_stack
+                    if use_zarr:
+                        stack = zarr.array(data=trial_stack, store=zarr.storage.TempStore(), chunks=(-1, -1, 16, 16, -1))
+                    else:
+                        stack = trial_stack
                 else:
-                    stack = np.append(stack, trial_stack, axis=0)
-
+                    if use_zarr:
+                        stack.append(trial_stack, axis=0)  # append is inplace!
+                    else:
+                        stack = np.append(stack, trial_stack, axis=0)
         else:
             stack = self._single_trial_stack(trial_number, split_channels, split_volumes, force_dims)
         return stack
