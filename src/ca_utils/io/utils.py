@@ -358,7 +358,7 @@ def parse_trial_timing(daq_file_name, frame_shapes=None,
             logs['pixels_zpos'][cnt] = get_pixel_zpos(zpos.copy(), frame_shapes[cnt],
                                                       d['frame_onset_samples'][logs['trial_onset_frame'][cnt]:logs['trial_offset_frame'][cnt]],
                                                       d['frame_offset_samples'][logs['trial_onset_frame'][cnt]:logs['trial_offset_frame'][cnt]],
-                                         smooth_zpos=True)
+                                                      smooth_zpos=True).astype(np.float16)
         else:
             logs['pixels_zpos'][cnt] = None
 

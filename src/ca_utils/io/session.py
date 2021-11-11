@@ -43,7 +43,7 @@ class Session():
             frame_height
             nb_channels: number of channels in stack (typically two channels, one for PMT in the microscope)
             channel_names
-            frame_rate_hz: frame rate as defined in scanimage, actual frame rate may differ slightly but this values should be good enough for most use cases
+            frame_rate_hz: frame rate as defined in scanimage, actual frame rate may differ slightly but these values should be good enough for most use cases
             volume_rate_hz: volume rate as defined in scanimage. should be close to frame_rate_hz * nb_slices. otherwise should be close to fra, actual volume rate may differ slightly but this values should be good enough for most use cases
             nb_slices
             stimonset_ms
@@ -71,13 +71,22 @@ class Session():
         frame_shapes = None
         if with_pixel_zpos:
             frame_shapes = [(lf.frame_width, lf.frame_height) for lf in self._logs_files]
-        self._logs_timing = parse_trial_timing(self._daq_file_name, frame_shapes, analog_in_channel_names)
-        tmp = parse_stim_log(self._log_file_name)
+        self._logs_files = pd.DataFrame(self._logs_files)
 
+        self._logs_timing = parse_trial_timing(self._daq_file_name, frame_shapes, analog_in_channel_names)
+        self._logs_timing = pd.DataFrame(self._logs_timing)
+
+        tmp = parse_stim_log(self._log_file_name)
         self._logs_stims = make_df_multi_index(tmp, analog_out_channel_names)
+
         self.log = pd.concat((self._logs_stims,
-                              pd.DataFrame(self._logs_files),
-                              pd.DataFrame(self._logs_timing)), axis=1)
+                              self._logs_files,
+                              self._logs_timing), axis=1)
+
+        del self._logs_timing
+        del self._logs_files
+        del self._logs_stims
+
         self.log.index.name = 'trial'
 
         # session-wide information
