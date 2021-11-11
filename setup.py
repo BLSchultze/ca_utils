@@ -7,7 +7,7 @@ with open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 
 setup(name='ca_utils',
-      version='0.2',
+      version='0.3',
       description='ca utils',
       long_description=long_description,
       long_description_content_type="text/markdown",
@@ -18,7 +18,7 @@ setup(name='ca_utils',
       py_modules=['ca_utils'],
       packages=find_packages('src'),
       package_dir={'': 'src'},
-      install_requires=['numpy', 'scipy', 'h5py', 'scanimage-tiff-reader>=1.4'],
+      install_requires=['numpy', 'scipy', 'h5py', 'scanimage-tiff-reader>=1.4', 'pandas', 'zarr', 'numba'],
       tests_require=['nose'],
       test_suite='nose.collector',
       include_package_data=True,
