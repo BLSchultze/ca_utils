@@ -74,7 +74,7 @@ def parse_files(path) -> List[str]:
     """
     recordings = glob(path + '_*.tif')
     recordings.sort()
-    logging.info(f'found {len(recordings)} recordings:')
+    logging.info(f'Found {len(recordings)} tif files.')
     files = [ScanImageTiffFile(recording) for recording in recordings]
     return files
 
@@ -293,10 +293,10 @@ def parse_trial_timing(daq_file_name, frame_shapes=None,
         daq_sampleinterval = f['samplenumber'][:][:, 0]
         try:
             fs = f.attrs['rate']
-            logging.info(f'using saved sampling rate of: {fs}Hz')
+            logging.info(f'Using saved sampling rate of: {fs} Hz.')
         except KeyError:
             fs = 10_000
-            logging.warning(f'sampling rate of recording not found in DAQ file - defaulting to {fs}Hz')
+            logging.warning(f'Sampling rate of recording not found in DAQ file - defaulting to {fs} Hz.')
 
     if channel_names is None:
         nb_channels = data.shape[1]
