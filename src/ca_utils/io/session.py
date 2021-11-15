@@ -96,7 +96,7 @@ class Session():
         return f"Session in {self.path} with {self.nb_trials} trials."
 
     def stack(self, trial_number: int = None, split_channels: bool = True, split_volumes: bool = False,
-              force_dims: bool = False, use_zarr: bool = True) -> np.ndarray:
+              force_dims: bool = False, use_zarr: bool = False) -> np.ndarray:
         """Load stack for a specific trial or for all trials.
 
         Gathers frames across files and reshape according to number of channels and/or volumes.
@@ -106,7 +106,9 @@ class Session():
             split_channels (bool, optional): reshape channel-interleaved tif to [time, [volume], x, y, channel]. Defaults to True.
             split_volumes (bool, optional): reshape channel-interleaved tif to [time, volume, x, y, [channel]]. Defaults to False.
             force_dims (bool, optional): [description]. Defaults to False.
-
+            use_zarr (bool, optional): If True, will memmap the stack to a zarr file.
+                                       If False, will load the whole thing into memory.
+                                       Defaults to False.
         Returns:
             np.ndarray of shape [time, width, heigh, channels]
         """
