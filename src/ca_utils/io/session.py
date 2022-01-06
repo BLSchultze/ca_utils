@@ -4,7 +4,7 @@ import pandas as pd
 from .utils import parse_trial_timing, parse_trial_files, parse_stim_log, make_df_multi_index
 from .scanimagetiffile import ScanImageTiffFile
 from typing import List
-import zarr
+
 
 class Session():
     """Session object.
@@ -106,30 +106,39 @@ class Session():
             split_channels (bool, optional): reshape channel-interleaved tif to [time, [volume], x, y, channel]. Defaults to True.
             split_volumes (bool, optional): reshape channel-interleaved tif to [time, volume, x, y, [channel]]. Defaults to False.
             force_dims (bool, optional): [description]. Defaults to False.
-            use_zarr (bool, optional): If True, will memmap the stack to a zarr file.
-                                       If False, will load the whole thing into memory.
-                                       Defaults to False.
         Returns:
             np.ndarray of shape [time, width, heigh, channels]
         """
         if trial_number is None:
-            for trial_number in range(self.nb_trials):
-                trial_stack = self._single_trial_stack(trial_number, split_channels, split_volumes, force_dims)
-                if trial_number == 0:  # init stacks on first trial
-                    if use_zarr:
-                        stack = zarr.array(data=trial_stack, store=zarr.storage.TempStore(), chunks=(-1, -1, 16, 16, -1))
-                    else:
-                        stack = trial_stack
-                else:
-                    if use_zarr:
-                        stack.append(trial_stack, axis=0)  # append is inplace!
-                    else:
-                        stack = np.append(stack, trial_stack, axis=0)
+            stack = self._all_trials_stack()
         else:
-            stack = self._single_trial_stack(trial_number, split_channels, split_volumes, force_dims)
+            stack = self._single_trial_stack(trial_number)
+
+        stack = self._reshape(stack, split_channels, split_volumes, force_dims, use_zarr)
+
         return stack
 
-    def _single_trial_stack(self, trial_number: int, split_channels: bool = True, split_volumes: bool = False, force_dims: bool = False) -> np.ndarray:
+    def _all_trials_stack(self, use_zarr: bool = False) -> np.ndarray:
+
+        nb_trials = len(self.log)
+        trial = self.log.loc[0]
+        total_nb_frames = sum([self.log.loc[trial_number].nb_frames for trial_number in range(nb_trials)])
+        if use_zarr:
+            filename = 'tmp.mmap'
+            stack = np.memmap(filename, dtype=np.int16, mode='w+', shape=(total_nb_frames, trial.frame_width, trial.frame_height))
+            stack[:] = 0
+        else:
+            stack = np.zeros((total_nb_frames, trial.frame_width, trial.frame_height), dtype=np.int16)
+
+        last_idx = 0
+        for trial_number in range(self.nb_trials):
+            trial_stack = self._single_trial_stack(trial_number)
+            stack[last_idx:int(last_idx + trial_stack.shape[0]), ...] = trial_stack
+            last_idx += trial_stack.shape[0]
+
+        return stack
+
+    def _single_trial_stack(self, trial_number: int) -> np.ndarray:
         """Loads the stack for a single trial.
 
         See `stack` for args.
@@ -137,16 +146,23 @@ class Session():
         trial = self.log.loc[trial_number]
         stack = np.zeros((trial.nb_frames, trial.frame_width, trial.frame_height), dtype=np.int16)
         last_idx = 0
-        # gather frames across files
+        # gather frames for the trial across files
         for file_name, first_frame, last_frame in zip(trial.file_names, trial.frames_first, trial.frames_last):
             with ScanImageTiffFile(file_name) as f:
-                d = f.data(beg=int(first_frame), end=int(last_frame))  # last_frame is +1 since slice-indices are not inclusive
+                d = f.data(beg=np.uint32(first_frame), end=np.uint32(last_frame))
                 stack[last_idx:int(last_idx + d.shape[0]), ...] = d
                 last_idx += d.shape[0]
+
+        return stack
+
+    def _reshape(self, stack: np.ndarray, split_channels: bool = True,
+                 split_volumes: bool = False, force_dims: bool = False,
+                 use_zarr: bool = False) -> np.ndarray:
         # reshape to split channels
+        trial = self.log.loc[0]
         if split_channels:
             stack = stack.reshape((-1, trial.nb_channels, trial.frame_width, trial.frame_height))
-            stack = stack.transpose((0, 2, 3, 1))  # reorder to [frames, x, y, channels]
+            stack = stack.transpose((0, 2, 3, 1))  # reorder from [frames, channels, x, y] to [frames, x, y, channels]
 
         # split by planes into volumes
         if split_volumes:
