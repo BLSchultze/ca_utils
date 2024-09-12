@@ -1,13 +1,10 @@
 # Tools for recording and analyzing for Ca data
 
-installation: `pip install git+https://github.com/janclemenslab/ca_utils`
-
-Full env with napari viewer and caiman
+## Installation
+Create a conda environment with napari viewer and caiman
 ```python
-mamba create -y -n ca python=3.7
+mamba create -y -n ca python=3.10 ipykernel caiman pyyaml matplotlib xarray tqdm napari pyside6 numba -y -c conda-forge
 conda activate ca
-mamba install ipykernel caiman pyyaml matplotlib xarray tqdm -y -c conda-forge
-pip install "napari[all]"
 pip install git+https://github.com/janclemenslab/napari-tifffile-reader.git
 pip install git+https://github.com/janclemenslab/ca_utils
 ```
@@ -72,3 +69,4 @@ import sima
 sequences = [sima.Sequence.create('ndarray', stack) for stack in stacks]
 dataset = sima.ImagingDataset(sequences, 'example_np.sima', channel_names=['gcamp', 'tdtomato'])
 ```
+**‌**
