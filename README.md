@@ -3,7 +3,7 @@
 ## Installation
 Create a conda environment with napari viewer and caiman
 ```python
-mamba create -y -n ca python=3.10 ipykernel caiman pyyaml matplotlib xarray tqdm napari pyside6 numba flammkuchen -y -c conda-forge
+mamba create -y -n ca python=3.10 ipykernel caiman pyyaml matplotlib xarray tqdm napari pyside6 numba flammkuchen defopt -y -c conda-forge
 conda activate ca
 pip install git+https://github.com/janclemenslab/napari-tifffile-reader.git
 pip install git+https://github.com/janclemenslab/ca_utils

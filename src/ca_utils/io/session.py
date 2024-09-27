@@ -1,12 +1,16 @@
 """Represent a single calcium imaging experiment."""
+
 import numpy as np
 import pandas as pd
-from .utils import parse_trial_timing, parse_trial_files, parse_stim_log, make_df_multi_index
+from .utils import parse_trial_timing, parse_trial_files, parse_stim_log, make_df_multi_index, load_prot
 from .scanimagetiffile import ScanImageTiffFile
-from typing import List
+import os
+from typing import List, Optional
+import rich
+import logging
 
 
-class Session():
+class Session:
     """Session object.
 
     Construction:
@@ -63,31 +67,51 @@ class Session():
         """
 
         self.path = path
-        self._log_file_name = self.path + '_daq.log'
-        self._daq_file_name = self.path + '_daq.h5'
+        self._log_file_name = self.path + "_daq.log"
+        self._daq_file_name = self.path + "_daq.h5"
+        self._prot_file_name = self.path + "_prot.yml"
 
-        # gather information from logs and data files
+        # open protocol file
+        self.prot = None
+        if os.path.exists(self._prot_file_name):
+            logging.info(f"   Parsing protocol file {self._prot_file_name}.")
+            self.prot = load_prot(self._prot_file_name)
+
+        # gather information from logs and tif files
         self._logs_files = parse_trial_files(self.path)
         frame_shapes = None
         if with_pixel_zpos:
             frame_shapes = [(lf.frame_width, lf.frame_height) for lf in self._logs_files]
         self._logs_files = pd.DataFrame(self._logs_files)
 
+        # get info from daq files
+        if analog_in_channel_names is None:
+            try:
+                analog_in_channel_names = self.prot["DAQ"]["analog_chans_in_info"]
+            except:
+                analog_in_channel_names = self.prot["DAQ"]["analog_chans_in"]
+
         self._logs_timing = parse_trial_timing(self._daq_file_name, frame_shapes, analog_in_channel_names)
         self._logs_timing = pd.DataFrame(self._logs_timing)
+
+        if analog_out_channel_names is None:
+            try:
+                analog_out_channel_names = (
+                    self.prot["DAQ"]["analog_chans_out_info"] + self.prot["DAQ"]["digital_chans_out_info"]
+                )
+            except:
+                analog_out_channel_names = self.prot["DAQ"]["analog_chans_out"] + self.prot["DAQ"]["digital_chans_out"]
 
         tmp = parse_stim_log(self._log_file_name)
         self._logs_stims = make_df_multi_index(tmp, analog_out_channel_names)
 
-        self.log = pd.concat((self._logs_stims,
-                              self._logs_files,
-                              self._logs_timing), axis=1)
+        self.log = pd.concat((self._logs_stims, self._logs_files, self._logs_timing), axis=1)
 
-        del self._logs_timing
-        del self._logs_files
-        del self._logs_stims
+        # del self._logs_timing
+        # del self._logs_files
+        # del self._logs_stims
 
-        self.log.index.name = 'trial'
+        self.log.index.name = "trial"
 
         # session-wide information
         self.nb_trials = len(self.log)
@@ -95,8 +119,14 @@ class Session():
     def __repr__(self) -> str:
         return f"Session in {self.path} with {self.nb_trials} trials."
 
-    def stack(self, trial_number: int = None, split_channels: bool = True, split_volumes: bool = False,
-              force_dims: bool = False, use_zarr: bool = False) -> np.ndarray:
+    def stack(
+        self,
+        trial_number: Optional[int] = None,
+        split_channels: bool = True,
+        split_volumes: bool = True,
+        force_dims: bool = False,
+        use_zarr: bool = False,
+    ) -> np.ndarray:
         """Load stack for a specific trial or for all trials.
 
         Gathers frames across files and reshape according to number of channels and/or volumes.
@@ -110,33 +140,38 @@ class Session():
             np.ndarray of shape [time, width, heigh, channels]
         """
         if trial_number is None:
-            stack = self._all_trials_stack()
+            stack, frame_times = self._all_trials_stack()
         else:
-            stack = self._single_trial_stack(trial_number)
+            stack, frame_times = self._single_trial_stack(trial_number)
 
         stack = self._reshape(stack, split_channels, split_volumes, force_dims, use_zarr)
+        # TODO: need to also reshape frametimes
+        # TODO: return xarray DataArray with labelled axes!!
 
         return stack
 
     def _all_trials_stack(self, use_zarr: bool = False) -> np.ndarray:
-
         nb_trials = len(self.log)
         trial = self.log.loc[0]
         total_nb_frames = sum([self.log.loc[trial_number].nb_frames for trial_number in range(nb_trials)])
         if use_zarr:
-            filename = 'tmp.mmap'
-            stack = np.memmap(filename, dtype=np.int16, mode='w+', shape=(total_nb_frames, trial.frame_width, trial.frame_height))
+            filename = "tmp.mmap"
+            stack = np.memmap(
+                filename, dtype=np.int16, mode="w+", shape=(total_nb_frames, trial.frame_width, trial.frame_height)
+            )
             stack[:] = 0
         else:
             stack = np.zeros((total_nb_frames, trial.frame_width, trial.frame_height), dtype=np.int16)
 
         last_idx = 0
+        frame_times = -np.ones(total_nb_frames)
         for trial_number in range(self.nb_trials):
-            trial_stack = self._single_trial_stack(trial_number)
-            stack[last_idx:int(last_idx + trial_stack.shape[0]), ...] = trial_stack
+            trial_stack, stack_frame_times = self._single_trial_stack(trial_number)
+            stack[last_idx : int(last_idx + trial_stack.shape[0]), ...] = trial_stack
+            # frame_times[last_idx : int(last_idx + trial_stack.shape[0])] = stack_frame_times[: trial_stack.shape[0]]
             last_idx += trial_stack.shape[0]
 
-        return stack
+        return stack, frame_times
 
     def _single_trial_stack(self, trial_number: int) -> np.ndarray:
         """Loads the stack for a single trial.
@@ -144,24 +179,33 @@ class Session():
         See `stack` for args.
         """
         trial = self.log.loc[trial_number]
-        stack = np.zeros((trial.nb_frames, trial.frame_width, trial.frame_height), dtype=np.int16)
+        stack = np.zeros((int(trial.nb_frames), int(trial.frame_width), int(trial.frame_height)), dtype=np.int16)
+        frame_times = -np.ones(int(trial.nb_frames))
         last_idx = 0
         # gather frames for the trial across files
         for file_name, first_frame, last_frame in zip(trial.file_names, trial.frames_first, trial.frames_last):
             with ScanImageTiffFile(file_name) as f:
                 d = f.data(beg=np.uint32(first_frame), end=np.uint32(last_frame))
-                stack[last_idx:int(last_idx + d.shape[0]), ...] = d
+                stack[last_idx : int(last_idx + d.shape[0]), ...] = d
+
+                t = np.asarray(f.description["frameTimestamps_sec"])
+                frame_times[last_idx : int(last_idx + d.shape[0]), ...] = t[: d.shape[0]]
+
                 last_idx += d.shape[0]
+        return stack, frame_times
 
-        return stack
-
-    def _reshape(self, stack: np.ndarray, split_channels: bool = True,
-                 split_volumes: bool = False, force_dims: bool = False,
-                 use_zarr: bool = False) -> np.ndarray:
+    def _reshape(
+        self,
+        stack: np.ndarray,
+        split_channels: bool = True,
+        split_volumes: bool = False,
+        force_dims: bool = False,
+        use_zarr: bool = False,
+    ) -> np.ndarray:
         # reshape to split channels
         trial = self.log.loc[0]
         if split_channels:
-            stack = stack.reshape((-1, trial.nb_channels, trial.frame_width, trial.frame_height))
+            stack = stack.reshape((-1, int(trial.nb_channels), int(trial.frame_width), int(trial.frame_height)))
             stack = stack.transpose((0, 2, 3, 1))  # reorder from [frames, channels, x, y] to [frames, x, y, channels]
 
         # split by planes into volumes
@@ -169,10 +213,10 @@ class Session():
             if split_channels:
                 nb_volumes = int(np.floor(stack.shape[0] / trial.nb_slices) * trial.nb_slices)
                 stack = stack[:nb_volumes, ...]
-                stack = stack.reshape((-1, trial.nb_slices, *stack.shape[1:]))
+                stack = stack.reshape((-1, int(trial.nb_slices), *stack.shape[1:]))
             else:
                 nb_volumes = int(np.floor(stack.shape[0] / trial.nb_slices / trial.nb_channels) * trial.nb_slices)
-                stack = stack[:nb_volumes * trial.nb_channels, ...]
+                stack = stack[: nb_volumes * trial.nb_channels, ...]
                 stack = stack.reshape((-1, trial.nb_slices, *stack.shape[1:]))
 
         if force_dims:
@@ -183,7 +227,7 @@ class Session():
 
         return stack
 
-    def argfind(self, column_title, pattern, channel=None, op='==') -> List[int]:
+    def argfind(self, column_title, pattern, channel=None, op="==") -> List[int]:
         """Get trial numbers of matching rows in playlist.
 
         Args:
@@ -208,16 +252,16 @@ class Session():
                 if isinstance(x, str):
                     x = '"' + x + '"'
 
-                if op == 'in':
-                    out = eval('{0}{1}{2}'.format(pattern, op, x))
+                if op == "in":
+                    out = eval("{0}{1}{2}".format(pattern, op, x))
                 else:
-                    out = eval('{0}{1}{2}'.format(x, op, pattern))
+                    out = eval("{0}{1}{2}".format(x, op, pattern))
 
                 if out:
                     matches.append(idx)
         return matches
 
-    def find(self, column_title, pattern, channel=None, op='=='):
+    def find(self, column_title, pattern, channel=None, op="=="):
         """Get matching rows from playlist (see argmatch for details)."""
         matches = self.argfind(column_title, pattern, channel, op)
         return self.log.loc[matches]

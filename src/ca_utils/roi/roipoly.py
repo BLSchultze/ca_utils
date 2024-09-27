@@ -1,6 +1,7 @@
 import matplotlib.path as mplPath
 import matplotlib.pyplot as plt
-'''Draw polygon regions of interest (ROIs) in matplotlib images,
+
+"""Draw polygon regions of interest (ROIs) in matplotlib images,
 similar to Matlab's roipoly function.
 
 See the file example.py for an application.
@@ -8,19 +9,20 @@ See the file example.py for an application.
 Created by Joerg Doepfert 2014 based on code posted by Daniel
 Kornhauser.
 
-'''
+"""
 
 
 import numpy as np
 import sys
 
 import matplotlib
-matplotlib.use('TKAgg', warn=False, force=True)  # changing backend of matplotlib for pyplot to work
+
+# matplotlib.use("TKAgg", warn=False, force=True)  # changing backend of matplotlib for pyplot to work
+matplotlib.use("TKAgg", force=True)  # changing backend of matplotlib for pyplot to work
 
 
 class roipoly:
-
-    def __init__(self, fig=[], ax=[], roicolor='b'):
+    def __init__(self, fig=[], ax=[], roicolor="b"):
         if fig == []:
             fig = plt.gcf()
 
@@ -37,8 +39,8 @@ class roipoly:
         self.fig = fig
         self.ax = ax
 
-        self.__ID1 = self.fig.canvas.mpl_connect('motion_notify_event', self.__motion_notify_callback)
-        self.__ID2 = self.fig.canvas.mpl_connect('button_press_event', self.__button_press_callback)
+        self.__ID1 = self.fig.canvas.mpl_connect("motion_notify_event", self.__motion_notify_callback)
+        self.__ID2 = self.fig.canvas.mpl_connect("button_press_event", self.__button_press_callback)
 
         if sys.flags.interactive:
             plt.show(block=False)
@@ -48,7 +50,7 @@ class roipoly:
     def getMask(self, currentImage):
         ny, nx = np.shape(currentImage)
         poly_verts = [(self.allxpoints[0], self.allypoints[0])]
-        for i in range(len(self.allxpoints)-1, -1, -1):
+        for i in range(len(self.allxpoints) - 1, -1, -1):
             poly_verts.append((self.allxpoints[i], self.allypoints[i]))
 
         # Create vertex coordinates for each grid cell...
@@ -62,9 +64,9 @@ class roipoly:
         return grid
 
     def displayROI(self, **linekwargs):
-        l = plt.Line2D(self.allxpoints + [self.allxpoints[0]],
-                       self.allypoints + [self.allypoints[0]],
-                       color=self.roicolor, **linekwargs)
+        l = plt.Line2D(
+            self.allxpoints + [self.allxpoints[0]], self.allypoints + [self.allypoints[0]], color=self.roicolor, **linekwargs
+        )
         ax = plt.gca()
         ax.add_line(l)
         plt.draw()
@@ -74,31 +76,32 @@ class roipoly:
         meanval = np.mean(np.extract(mask, currentImage))
         stdval = np.std(np.extract(mask, currentImage))
         string = "%.3f +- %.3f" % (meanval, stdval)
-        plt.text(self.allxpoints[0], self.allypoints[0],
-                 string, color=self.roicolor,
-                 bbox=dict(facecolor='w', alpha=0.6), **textkwargs)
+        plt.text(
+            self.allxpoints[0],
+            self.allypoints[0],
+            string,
+            color=self.roicolor,
+            bbox=dict(facecolor="w", alpha=0.6),
+            **textkwargs,
+        )
 
     def __motion_notify_callback(self, event):
-        #print('motion_notify_callback entered') #elsa
+        # print('motion_notify_callback entered') #elsa
         if event.inaxes:
             # ax = event.inaxes
             x, y = event.xdata, event.ydata
             if (event.button is None or event.button == 1) and self.line is not None:  # Move line around
-                self.line.set_data([self.previous_point[0], x],
-                                   [self.previous_point[1], y])
+                self.line.set_data([self.previous_point[0], x], [self.previous_point[1], y])
                 self.fig.canvas.draw()
 
     def __button_press_callback(self, event):
-        #print('button_press_event entered') #elsa
+        # print('button_press_event entered') #elsa
         if event.inaxes:
             x, y = event.xdata, event.ydata
             ax = event.inaxes
             if event.button == 1 and not event.dblclick:  # If you press the left button, single click
                 if self.line is None:  # if there is no line, create a line
-                    self.line = plt.Line2D([x, x],
-                                           [y, y],
-                                           marker='o',
-                                           color=self.roicolor)
+                    self.line = plt.Line2D([x, x], [y, y], marker="o", color=self.roicolor)
                     self.start_point = [x, y]
                     self.previous_point = self.start_point
                     self.allxpoints = [x]
@@ -108,21 +111,22 @@ class roipoly:
                     self.fig.canvas.draw()
                     # add a segment
                 else:  # if there is a line, create a segment
-                    self.line = plt.Line2D([self.previous_point[0], x],
-                                           [self.previous_point[1], y],
-                                           marker='o', color=self.roicolor)
+                    self.line = plt.Line2D(
+                        [self.previous_point[0], x], [self.previous_point[1], y], marker="o", color=self.roicolor
+                    )
                     self.previous_point = [x, y]
                     self.allxpoints.append(x)
                     self.allypoints.append(y)
 
                     event.inaxes.add_line(self.line)
                     self.fig.canvas.draw()
-            elif ((event.button == 1 and event.dblclick) or (event.button == 3 and not event.dblclick)) and self.line is not None:  # close the loop and disconnect
+            elif (
+                (event.button == 1 and event.dblclick) or (event.button == 3 and not event.dblclick)
+            ) and self.line is not None:  # close the loop and disconnect
                 self.fig.canvas.mpl_disconnect(self.__ID1)  # joerg
                 self.fig.canvas.mpl_disconnect(self.__ID2)  # joerg
 
-                self.line.set_data([self.previous_point[0], self.start_point[0]],
-                                   [self.previous_point[1], self.start_point[1]])
+                self.line.set_data([self.previous_point[0], self.start_point[0]], [self.previous_point[1], self.start_point[1]])
                 ax.add_line(self.line)
                 self.fig.canvas.draw()
                 self.line = None
@@ -130,5 +134,5 @@ class roipoly:
                 if sys.flags.interactive:
                     pass
                 else:
-                    #figure has to be closed so that code can continue
+                    # figure has to be closed so that code can continue
                     plt.close(self.fig)
