@@ -6,8 +6,8 @@ from .utils import parse_trial_timing, parse_trial_files, parse_stim_log, make_d
 from .scanimagetiffile import ScanImageTiffFile
 import os
 from typing import List, Optional
-import rich
 import logging
+import xarray as xr
 
 
 class Session:
@@ -83,7 +83,7 @@ class Session:
         if with_pixel_zpos:
             frame_shapes = [(lf.frame_width, lf.frame_height) for lf in self._logs_files]
         self._logs_files = pd.DataFrame(self._logs_files)
-
+        self.nb_trials = len(self._logs_files)
         # get info from daq files
         if analog_in_channel_names is None:
             try:
@@ -92,7 +92,8 @@ class Session:
                 analog_in_channel_names = self.prot["DAQ"]["analog_chans_in"]
 
         self._logs_timing = parse_trial_timing(self._daq_file_name, frame_shapes, analog_in_channel_names)
-        self._logs_timing = pd.DataFrame(self._logs_timing)
+        self._logs_timing = pd.DataFrame(self._logs_timing).iloc[: self.nb_trials]
+        # print(self._logs_timing.iloc)
 
         if analog_out_channel_names is None:
             try:
@@ -103,13 +104,12 @@ class Session:
                 analog_out_channel_names = self.prot["DAQ"]["analog_chans_out"] + self.prot["DAQ"]["digital_chans_out"]
 
         tmp = parse_stim_log(self._log_file_name)
-        self._logs_stims = make_df_multi_index(tmp, analog_out_channel_names)
-
+        self._logs_stims = make_df_multi_index(tmp, analog_out_channel_names).iloc[: self.nb_trials]
         self.log = pd.concat((self._logs_stims, self._logs_files, self._logs_timing), axis=1)
 
-        # del self._logs_timing
-        # del self._logs_files
-        # del self._logs_stims
+        del self._logs_timing
+        del self._logs_files
+        del self._logs_stims
 
         self.log.index.name = "trial"
 
@@ -141,12 +141,19 @@ class Session:
         """
         if trial_number is None:
             stack, frame_times = self._all_trials_stack()
+            metadata = {}
         else:
             stack, frame_times = self._single_trial_stack(trial_number)
-
+            metadata = self.log.loc[trial_number].to_dict()
+            metadata["stim_info"] = self.stim_info(trial_number=trial_number)
         stack = self._reshape(stack, split_channels, split_volumes, force_dims, use_zarr)
-        # TODO: need to also reshape frametimes
-        # TODO: return xarray DataArray with labelled axes!!
+
+        stack = xr.DataArray(
+            stack,
+            dims=["time", "z", "x", "y", "channel"],
+            coords={"time": frame_times, "channel": ["gcamp", "tdtomato"][: stack.shape[-1]]},
+            attrs=metadata,
+        )
 
         return stack
 
@@ -187,11 +194,9 @@ class Session:
             with ScanImageTiffFile(file_name) as f:
                 d = f.data(beg=np.uint32(first_frame), end=np.uint32(last_frame))
                 stack[last_idx : int(last_idx + d.shape[0]), ...] = d
-
-                t = np.asarray(f.description["frameTimestamps_sec"])
-                frame_times[last_idx : int(last_idx + d.shape[0]), ...] = t[: d.shape[0]]
-
                 last_idx += d.shape[0]
+        frame_times = np.array(trial["frameonset_ms"]) / 1_000
+
         return stack, frame_times
 
     def _reshape(
@@ -226,6 +231,38 @@ class Session:
                 stack = stack[:, np.newaxis, ...]
 
         return stack
+
+    def stim_info(self, *, trial=None, trial_number=None):
+        """Return stimulus info as DataFrame
+
+        Must specify:
+        - either trial (stack with attached metadata for a single trial)
+        - or the trial number (will load associated trial)
+
+        Args:
+            trial (xarray.DataSet, optional): _description_. Defaults to None.
+            trial_number (int, optional): _description_. Defaults to None.
+
+        Returns:
+            pd.DataFrame: For each stimulus channel, info on stim name, onset/offset, and intensity,
+        """
+        if trial is not None:
+            trial_log = trial.attrs
+        elif trial_number is not None:
+            trial_log = self.log.loc[trial_number]
+
+        stims = [k.rstrip("_onset_ms") for k in trial_log.keys() if "_onset_ms" in k]
+
+        keys = ["name", "onset_seconds", "offset_seconds", "intensity"]
+        stim_info = {key: [] for key in keys}
+        for stim in stims:
+            stim_info["onset_seconds"].append(trial_log[stim + "_onset_ms"] / 1_000)
+            stim_info["offset_seconds"].append(trial_log[stim + "_offset_ms"] / 1_000)
+            stim_info["name"].append(trial_log[("stimFileName", stim)])
+            stim_info["intensity"].append(trial_log[("intensity", stim)])
+
+        stim_info = pd.DataFrame(stim_info, index=stims)
+        return stim_info
 
     def argfind(self, column_title, pattern, channel=None, op="==") -> List[int]:
         """Get trial numbers of matching rows in playlist.

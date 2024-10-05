@@ -102,7 +102,7 @@ def parse_files(path) -> List[ScanImageTiffFile]:
         try:
             files.append(ScanImageTiffFile(tif_file))
         except:
-            logging.warning(f"Failed loading '{tif_file}'")
+            logging.debug(f"Failed loading '{tif_file}'")
     return files
 
 
@@ -128,7 +128,7 @@ def parse_trial_files(path):
     )  # running number of frames in session, -1 for 0-based indexing
 
     trial_uni, trial_index = np.unique(trial_starttime, return_inverse=True)
-    nb_trials = len(trial_uni)
+    nb_trials = len(files)
 
     file_onsets = (
         np.where(np.diff(file_index) > 0)[0].astype(np.uintp) + 1
