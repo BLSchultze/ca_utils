@@ -132,8 +132,12 @@ class StackView(pg.GraphicsLayoutWidget):
         traces = self.get_traces()
         self.roi_changed.emit(traces)
 
-    def signal_update_traces(self, roi):
-        roi.changed = True  # unused but could be good for only updating changed rois
+    def signal_update_traces(self, roi=None):
+        if roi is None:
+            for roi in self.rois:
+                roi.changed = True
+        else:
+            roi.changed = True
         traces = self.get_traces()
         self.roi_changed.emit(traces)
 
