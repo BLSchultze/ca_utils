@@ -219,8 +219,17 @@ def parse_daq(ypos, zpos, next_trigger, sound=None, channel_names=None) -> Dict[
     frame_onset_samples = np.zeros_like(frame_offset_samples)
     frame_onset_samples[1:] = frame_offset_samples[:-1] + 1  # samples after frame offset
     # detect first frame onset
-    tmp = find_peaks(-d_ypos[: frame_onset_samples[1]], height=np.max(d_ypos) / 2)
+    # this is a bit brittle - maybe subtract the (median?) baseline???
+    # try:
+    #     height = np.max(d_ypos) / 2
+    #     tmp = find_peaks(-d_ypos[: frame_onset_samples[1]], height=height)
+    #     frame_onset_samples[0] = tmp[0] - 1
+    # except ValueError:
+    height = np.max(-d_ypos[: frame_onset_samples[1]]) / 2
+    tmp = find_peaks(-d_ypos[: frame_onset_samples[1]], height=height)
     frame_onset_samples[0] = tmp[0] - 1
+
+    # frame_onset_samples[0] = tmp[0] - 1
     d_nt = np.diff(next_trigger)
     trial_onset_samples, _ = find_peaks(d_nt, height=np.max(d_nt) / 2)
     # from these construct trial offset samples:
@@ -348,14 +357,22 @@ def parse_trial_timing(daq_file_name, frame_shapes=None, channel_names: Optional
     Returns:
         [type]: [description]
     """
+    # this will be wrong in most cases - so smake channel_names a required arg? and allow providing it when initiating the session?
+    idx_y_pos = 0
+    idx_z_pos = 1
+    idx_next = 6
+    if channel_names is not None:
+        idx_y_pos = channel_names.index("y pos feedback")
+        idx_z_pos = channel_names.index("piezo pos feeback")
+        idx_next = channel_names.index("next trigger")
 
     # parse DAQ data for synchronization
     with h5py.File(daq_file_name, "r") as f:
         data = f["samples"][:]
-        ypos = data[:, 0]  # y pos of the scan pixel
-        zpos = data[:, 1]  # z pos of the scan pixel
+        ypos = data[:, idx_y_pos]  # y pos of the scan pixel
+        zpos = data[:, idx_z_pos]  # z pos of the scan pixel
         # next_trigger = data[:, 5]  # should be "6"
-        next_trigger = data[:, 6]  # should be "6"
+        next_trigger = data[:, idx_next]  # should be "6"
         # sound = np.sum(data[:, 3:5], axis=1)  # pool left and right channel
         # sound = data[:, 3:]
         daq_stamps = f["systemtime"][:][:, 0]

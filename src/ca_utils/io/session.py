@@ -148,10 +148,20 @@ class Session:
             metadata["stim_info"] = self.stim_info(trial_number=trial_number)
         stack = self._reshape(stack, split_channels, split_volumes, force_dims, use_zarr)
 
+        # volume times correspond to the time of the first frame for each volume
+        nb_volumes = stack.shape[0]
+        nb_layers = stack.shape[1]
+        frame_times = frame_times[::nb_layers]
+        frame_times = frame_times[:nb_volumes]
+
         stack = xr.DataArray(
             stack,
             dims=["time", "z", "x", "y", "channel"],
-            coords={"time": frame_times, "channel": ["gcamp", "tdtomato"][: stack.shape[-1]]},
+            coords={
+                "time": frame_times,
+                "z": np.arange(stack.shape[1], dtype=int),
+                "channel": ["gcamp", "tdtomato"][: stack.shape[-1]],
+            },
             attrs=metadata,
         )
 

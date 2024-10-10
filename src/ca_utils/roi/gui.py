@@ -208,17 +208,20 @@ class StackView(pg.GraphicsLayoutWidget):
     def update_time(self, new_time):
         self.current_time = new_time
         data = self.da.sel(time=self.current_time, method="nearest")
-        self.data = data.sel(channel=self.current_channel, z=self.current_layer).data
+        data = data.sel(z=self.current_layer, method="nearest")
+        self.data = data.sel(channel=self.current_channel).data
 
     def update_layer(self, slider_value):
         self.current_layer = slider_value
         data = self.da.sel(time=self.current_time, method="nearest")
-        self.data = data.sel(channel=self.current_channel, z=self.current_layer).data
+        data = data.sel(z=self.current_layer, method="nearest")
+        self.data = data.sel(channel=self.current_channel).data
 
     def on_channel_changed(self, new_channel_name):
         self.current_channel = new_channel_name
         data = self.da.sel(time=self.current_time, method="nearest")
-        self.data = data.sel(channel=self.current_channel, z=self.current_layer).data
+        data = data.sel(z=self.current_layer, method="nearest")
+        self.data = data.sel(channel=self.current_channel).data
 
     def on_trial_changed(self, new_trial_index):
         self.current_trial = new_trial_index  # !! NEED TO CHANGE THE WIDGET TO A DROPDOWN WITH CHANNEL NAMES
@@ -374,9 +377,14 @@ class Widget(QWidget):
 
         # Layer
         if len(self.stack_view.da.z) > 1:
+            # self.w2 = QtWidgets.QSlider(orientation=Qt.Horizontal)
+            # self.w2.setMinimum(0)
+            # self.w2.setMaximum(len(self.stack_view.da.z) - 1)
+            # self.verticalLayout.addWidget(self.w2)
+            # self.w2.valueChanged.connect(self.stack_view.update_layer)
             self.w2 = DoubleSlider(orientation=Qt.Horizontal)
-            self.w1.setMinimum(int(min(self.stack_view.da.z)))
-            self.w1.setMaximum(int(max(self.stack_view.da.z)))
+            self.w2.setMinimum(float(min(self.stack_view.da.z)))
+            self.w2.setMaximum(float(max(self.stack_view.da.z)))
             self.verticalLayout.addWidget(self.w2)
             self.w2.doubleValueChanged.connect(self.stack_view.update_layer)
 
