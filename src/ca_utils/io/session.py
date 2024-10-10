@@ -82,6 +82,14 @@ class Session:
         frame_shapes = None
         if with_pixel_zpos:
             frame_shapes = [(lf.frame_width, lf.frame_height) for lf in self._logs_files]
+
+        # drop last file if it only contains a single volume or layer
+        last_nb_frames = self._logs_files[-1].nb_frames
+        nb_slices = self._logs_files[-1].nb_slices
+        if last_nb_frames < nb_slices + 2:
+            self._logs_files = self._logs_files[:-1]
+            logging.info("Last frame has less than two volumens - dropping.")
+
         self._logs_files = pd.DataFrame(self._logs_files)
         self.nb_trials = len(self._logs_files)
         # get info from daq files
