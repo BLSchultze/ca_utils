@@ -86,8 +86,8 @@ class StackView(pg.GraphicsLayoutWidget):
         self.plt_image.hideAxis("left")
         self.plt_image.hideAxis("bottom")
         self.plt_image.setDefaultPadding(0)
-        vb = self.plt_image.getViewBox()
-        vb.setAspectLocked(True, ratio=1)
+        self.vb = self.plt_image.getViewBox()
+        self.vb.setAspectLocked(True, ratio=1)
         self.img.setLevels(np.percentile(self.data, [1, 99]))
         # zoom to fit image
         self.plt_image.autoRange()
@@ -113,17 +113,16 @@ class StackView(pg.GraphicsLayoutWidget):
         roi = pg.PolyLineROI(
             [[x - 30, y - 30], [x + 30, y - 30], [x + 30, y + 30], [x - 30, y + 30]],
             closed=True,
-            pen=pg.mkPen(color=self.colors[len(self.rois)], width=4),
-            # maxBounds=QtCore.QRect(
-            #     0, 0, *self.data.shape
-            # ),  # coords are not same as img - need to transform from img to widget coords!!
+            pen=pg.mkPen(color=self.colors[len(self.rois) % len(self.colors)], width=4),
+            # maxBounds=QtCore.QRect(0, 0, *self.data.shape),
         )
         roi.move_handle = roi.addTranslateHandle([x, y], name="move_handle")
-        roi.move_handle_callback = roi.sigRegionChangeFinished.connect(self.center_move_handle)
         roi.changed = True  # indicate mask needs update, which will trigger trace update
         roi.mask_changed = True  # indicate trace needs update
         roi.mask = None
         roi.trace = None
+        roi.layer = self.current_layer
+        print(self.current_layer)
         roi.sigRegionChangeFinished.connect(self.signal_update_traces)
         roi.setAcceptedMouseButtons(QtCore.Qt.MouseButton.RightButton)
         roi.sigClicked.connect(self.remove_roi)
@@ -144,24 +143,27 @@ class StackView(pg.GraphicsLayoutWidget):
     def remove_roi(self, roi):
         logging.info(f"Removing ROI {self.rois.index(roi)}.")
 
-        # remove all rois from plot
-        for roi in self.rois:
-            self.plt_image.removeItem(roi)
-        # remove right-clicked roi from list
+        # remove right-clicked roi from list and plot
+        self.plt_image.removeItem(roi)
         self.rois.remove(roi)
+
+        # # remove all rois from plot
+        for cnt, roi in enumerate(self.rois):
+            (roi.setPen(color=self.colors[cnt % len(self.colors)], width=4))
+            self.plt_image.removeItem(roi)
         # add all remaining rois to plot again - required to keep colors consistent between rois and traces
         for roi in self.rois:
             self.plt_image.addItem(roi)
 
         traces = self.get_traces()
         self.roi_changed.emit(traces)
-
-    def center_move_handle(self, roi: pg.ROI): ...
+        # self.image_data_changed.emit(self._data)
 
     def get_masks(self):
         masks = []
         if len(self.rois):
             cols, rows = self.data.shape
+            nb_layers = len(self.da.z)
             m = np.mgrid[:cols, :rows]
             possx = m[0, :, :]  # make the x pos array
             possy = m[1, :, :]  # make the y pos array
@@ -175,9 +177,8 @@ class StackView(pg.GraphicsLayoutWidget):
                     mpossx = mpossx[np.nonzero(mpossx)]  # get the x pos from ROI
                     mpossy = roi.getArrayRegion(possy, self.img).astype(int)
                     mpossy = mpossy[np.nonzero(mpossy)]  # get the y pos from ROI
-                    mask = np.zeros(self.data.shape, dtype=bool)
-                    mask[mpossx, mpossy] = True
-                    mask = mask[np.newaxis, ...]
+                    mask = np.zeros((nb_layers, cols, rows), dtype=bool)
+                    mask[self.current_layer, mpossx, mpossy] = True
                     roi.mask = mask
                     roi.mask_changed = True
                     roi.changed = False
@@ -200,7 +201,13 @@ class StackView(pg.GraphicsLayoutWidget):
 
     def on_image_data_changed(self, data):
         self.img.setImage(self.data)
-        self.img.setLevels(np.percentile(self.data, [1, 99]))
+        self.img.setLevels(np.percentile(self.data, [1, 99]))  # auto contrast
+        # only show rois in current layer
+        for roi in self.rois:
+            if roi.layer == self.current_layer:
+                roi.show()
+            else:
+                roi.hide()
 
     def show_time_avg(self):
         self.data = self.temporal_avg.data[0, ..., 0]
@@ -212,7 +219,7 @@ class StackView(pg.GraphicsLayoutWidget):
         self.data = data.sel(channel=self.current_channel).data
 
     def update_layer(self, slider_value):
-        self.current_layer = slider_value
+        self.current_layer = int(slider_value)
         data = self.da.sel(time=self.current_time, method="nearest")
         data = data.sel(z=self.current_layer, method="nearest")
         self.data = data.sel(channel=self.current_channel).data
@@ -232,7 +239,7 @@ class StackView(pg.GraphicsLayoutWidget):
         if data_file is None:
             data_file, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open DAQ file", "./", "DAQ file (*_daq.h5)")
 
-        self.data_file = data_file.rstrip("_daq.h5")
+        self.data_file = data_file.removesuffix("_daq.h5")
         self.session = ca.Session(self.data_file)
         da = self.load_trial(trial_number)
         self.clear_rois()
@@ -264,7 +271,7 @@ class StackView(pg.GraphicsLayoutWidget):
         else:
             masks = self.get_masks()
             save_file = self.data_file + "_rois.h5"
-            logging.warning(f"Saving {len(masks)} ROIs and traces to {save_file}.")
+            logging.warning(f"Saving {masks.shape[0]} ROIs and traces to {save_file}.")
             masks.to_netcdf(save_file)
 
 
@@ -333,7 +340,7 @@ class TracesView(pg.GraphicsLayoutWidget):
             if self.mode == "dF/F":
                 trace = (trace - f0) / f0
 
-            self.plt_traces.plot(trace.time, trace, skipFiniteCheck=True, pen=self.colors[roi_cnt])
+            self.plt_traces.plot(trace.time, trace, skipFiniteCheck=True, pen=self.colors[roi_cnt % len(self.colors)])
 
 
 class Widget(QWidget):
