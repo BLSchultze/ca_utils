@@ -213,8 +213,9 @@ class Session:
                 d = f.data(beg=np.uint32(first_frame), end=np.uint32(last_frame))
                 stack[last_idx : int(last_idx + d.shape[0]), ...] = d
                 last_idx += d.shape[0]
-        frame_times = np.array(trial["frameonset_ms"]) / 1_000
 
+        frame_times = np.array(trial["frameonset_ms"]) / 1_000
+        stack = stack[: len(frame_times), ...]
         return stack, frame_times
 
     def _reshape(
