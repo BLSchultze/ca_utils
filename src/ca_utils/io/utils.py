@@ -117,28 +117,16 @@ def parse_trial_files(path):
     """
     files = parse_files(path)
     # assemble file numbers/names and frame-numbers for each trial
-    trial_starttime = np.concatenate(
-        [f.description["nextFileMarkerTimestamps_sec"] for f in files]
-    )  # start time of the current trial for each frame
-    file_index = (
-        np.concatenate([f.description["acquisitionNumbers"] for f in files]) - 1
-    )  # file number for each frame, -1 for 0-based indexing
-    frame_numbers = (
-        np.concatenate([f.description["frameNumbers"] for f in files]) - 1
-    )  # running number of frames in session, -1 for 0-based indexing
+    trial_starttime = np.concatenate([f.description["nextFileMarkerTimestamps_sec"] for f in files])  # start time of the current trial for each frame
+    file_index = np.concatenate([f.description["acquisitionNumbers"] for f in files]) - 1  # file number for each frame, -1 for 0-based indexing
+    frame_numbers = np.concatenate([f.description["frameNumbers"] for f in files]) - 1  # running number of frames in session, -1 for 0-based indexing
 
     trial_uni, trial_index = np.unique(trial_starttime, return_inverse=True)
     nb_trials = len(files)
 
-    file_onsets = (
-        np.where(np.diff(file_index) > 0)[0].astype(np.uintp) + 1
-    )  # plus 1 since we want the first frame *after* the change
-    file_onsets = np.pad(
-        file_onsets, (1, 0), mode="constant", constant_values=(0, len(file_index))
-    )  # append first frame as first file onset
-    file_offsets = np.pad(
-        file_onsets[1:], (0, 1), mode="constant", constant_values=(0, len(file_index))
-    )  # append last frame as last file offset
+    file_onsets = np.where(np.diff(file_index) > 0)[0].astype(np.uintp) + 1  # plus 1 since we want the first frame *after* the change
+    file_onsets = np.pad(file_onsets, (1, 0), mode="constant", constant_values=(0, len(file_index)))  # append first frame as first file onset
+    file_offsets = np.pad(file_onsets[1:], (0, 1), mode="constant", constant_values=(0, len(file_index)))  # append last frame as last file offset
 
     # probably don't need this if we only care about the first and last frame for that trial from each file
     # within trial frame number
@@ -156,9 +144,7 @@ def parse_trial_files(path):
         file_names = [files[ii].name for ii in uni_files]
         framenumbers = [frm[file_index[idx] == ii] for ii in uni_files]
         frames_first = [int(f[0]) for f in framenumbers]
-        frames_last = [
-            int(f[-1] + 1) for f in framenumbers
-        ]  # +1 since we we use it as a range (exclusive bounds), otherwise we would miss the last frame
+        frames_last = [int(f[-1] + 1) for f in framenumbers]  # +1 since we we use it as a range (exclusive bounds), otherwise we would miss the last frame
         nb_frames = sum([int(last - first) for first, last in zip(frames_first, frames_last)])
         # add some metadata to the trial info from the first file in each trial
         frame_width = int(files[uni_files[0]].metadata["hRoiManager.pixelsPerLine"])
@@ -245,8 +231,8 @@ def parse_daq(ypos, zpos, next_trigger, sound=None, channel_names=None) -> Dict[
         for channel, channel_name in enumerate(channel_names):
             if channel_name is None:
                 continue
-            onset_samples = np.zeros((len(trial_onset_samples),), dtype=np.uintp)
-            offset_samples = np.zeros((len(trial_onset_samples),), dtype=np.uintp)
+            onset_samples = np.zeros((len(trial_onset_samples),), dtype=np.intp)
+            offset_samples = np.zeros((len(trial_onset_samples),), dtype=np.intp)
             for cnt, (trial_start_sample, trial_end_sample) in enumerate(zip(trial_onset_samples, trial_offset_samples)):
                 trial_sound = sound[trial_start_sample:trial_end_sample, channel]
                 trial_sound[:10] = 0
@@ -431,41 +417,19 @@ def parse_trial_timing(daq_file_name, frame_shapes=None, channel_names: Optional
         logs["trial_offset_time"][cnt] = ip(d["trial_offset_samples"][cnt])
         logs["frame_zpos"][cnt] = d["frame_zpos"][logs["trial_onset_frame"][cnt] : logs["trial_offset_frame"][cnt]]
 
-        frame_onset = (
-            (
-                d["frame_onset_samples"][logs["trial_onset_frame"][cnt] : logs["trial_offset_frame"][cnt]]
-                - d["trial_onset_samples"][cnt]
-            )
-            / fs
-            * 1000
-        )
+        frame_onset = (d["frame_onset_samples"][logs["trial_onset_frame"][cnt] : logs["trial_offset_frame"][cnt]] - d["trial_onset_samples"][cnt]) / fs * 1000
         logs["frameonset_ms"][cnt] = frame_onset.tolist()
-        frame_offset = (
-            (
-                d["frame_offset_samples"][logs["trial_onset_frame"][cnt] : logs["trial_offset_frame"][cnt]]
-                - d["trial_onset_samples"][cnt]
-            )
-            / fs
-            * 1000
-        )
+        frame_offset = (d["frame_offset_samples"][logs["trial_onset_frame"][cnt] : logs["trial_offset_frame"][cnt]] - d["trial_onset_samples"][cnt]) / fs * 1000
         logs["frameoffset_ms"][cnt] = frame_offset.tolist()
 
         for channel_name in channel_names:
             if channel_name is None:
                 continue
-            logs[f"{channel_name}_onset_ms"][cnt] = float(
-                (d[f"{channel_name}_onset_samples"][cnt] - d["trial_onset_samples"][cnt]) / fs * 1000
-            )
-            logs[f"{channel_name}_offset_ms"][cnt] = float(
-                (d[f"{channel_name}_offset_samples"][cnt] - d["trial_onset_samples"][cnt]) / fs * 1000
-            )
+            logs[f"{channel_name}_onset_ms"][cnt] = float((d[f"{channel_name}_onset_samples"][cnt] - d["trial_onset_samples"][cnt]) / fs * 1000)
+            logs[f"{channel_name}_offset_ms"][cnt] = float((d[f"{channel_name}_offset_samples"][cnt] - d["trial_onset_samples"][cnt]) / fs * 1000)
             # get these rel. to time of frame midpoint?
-            logs[f"{channel_name}_onset_frame"][cnt] = find_nearest(
-                logs["frameoffset_ms"][cnt], logs[f"{channel_name}_onset_ms"][cnt]
-            )
-            logs[f"{channel_name}_offset_frame"][cnt] = find_nearest(
-                logs["frameoffset_ms"][cnt], logs[f"{channel_name}_offset_ms"][cnt]
-            )
+            logs[f"{channel_name}_onset_frame"][cnt] = find_nearest(logs["frameoffset_ms"][cnt], logs[f"{channel_name}_onset_ms"][cnt])
+            logs[f"{channel_name}_offset_frame"][cnt] = find_nearest(logs["frameoffset_ms"][cnt], logs[f"{channel_name}_offset_ms"][cnt])
 
         if frame_shapes:  # get zpos per pixel
             logs["pixels_zpos"][cnt] = get_pixel_zpos(
