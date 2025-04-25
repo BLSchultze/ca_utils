@@ -166,7 +166,6 @@ class Session:
         else:
             stack, frame_times = self._single_trial_stack(trial_number)
             metadata = self.log.loc[trial_number].to_dict()
-            metadata["stim_info"] = self.stim_info(trial_number=trial_number)
         stack = self._reshape(stack, split_channels, split_volumes, force_dims, use_zarr)
 
         # volume times correspond to the time of the first frame for each volume
@@ -185,6 +184,8 @@ class Session:
             },
             attrs=metadata,
         )
+        # Add infos about the stimuli to the dataset attributes (works for single trials and all trials)
+        stack.attrs["stim_info"] = self.stim_info(trial=stack)
 
         return stack
 
